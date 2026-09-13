@@ -1,21 +1,22 @@
 /*
 =============================================================================
 MODULE: backend/booking/bookingSaga.js
-VERSION: v5007.0-FINAL
-BASE: BIBLIA v5002.5 + MOTOR DE RESERVAS + DIRECTRICES V19
+VERSION: v5007.2-FINAL (FIX A5 aplicado)
+BASE: BIBLIA v5002.5 Bloque 12.3 + MOTOR DE RESERVAS + DIRECTRICES V19
 RESPONSIBILITY: Orquestador transaccional. Implementa el patron Saga con
                 compensaciones para reservas simples y duales. Gestiona locks,
                 heartbeat, idempotencia y creacion paralela F1+F2.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
-           ZERO legacy (serviceId, linkedPhases, resourceId).
+           Nomenclatura v19.6: serviceId, linkedPhases, resourceId.
 CORRECTIONS APPLIED:
-  [SAGA-01] Nomenclatura v19.6: serviceId, linkedPhases, resourceId.
-  [SAGA-02] linkedPhases como fuente primaria de F2 (fix S-01).
-  [SAGA-03] Idempotencia triple capa: pairToken + BookingTransactions + CitasF2.
-  [SAGA-04] Locks con heartbeat cada 15s (CONCURRENCY.HEARTBEAT_MS).
-  [SAGA-05] Compensacion: cancelBookingElevated + CompensacionesPendientes.
-  [SAGA-06] Revalidacion en tiempo real antes de locks (skipCache: true).
-  [SAGA-07] Jitter de 400-1000ms en F2 para reducir contencion API.
+  [FIX A5] Re-export de _extractCheckoutId desde bookingCore.js
+           para cumplir inventario BIBLIA 12.3.
+  [SAGA-01] linkedPhases como fuente primaria de F2 (fix S-01).
+  [SAGA-02] Idempotencia triple capa: pairToken + BookingTransactions + CitasF2.
+  [SAGA-03] Locks con heartbeat cada 15s (CONCURRENCY.HEARTBEAT_MS).
+  [SAGA-04] Compensacion: cancelBookingElevated + CompensacionesPendientes.
+  [SAGA-05] Revalidacion en tiempo real antes de locks (skipCache: true).
+  [SAGA-06] Jitter de 400-1000ms en F2 para reducir contencion API.
 =============================================================================
 */
 
@@ -66,7 +67,6 @@ import {
   _forceStaffInPristineSlot,
   _buildLockKeys,
   _getDualPairFromCache,
-  _extractCheckoutId,
   createBookingError,
   normalizeError,
   _handleError,
@@ -74,7 +74,15 @@ import {
   _updateCitaSafe,
 } from "backend/booking/bookingCore";
 
-import { _resolveServiceIdInternal, _invalidateCachesInternal, _listTimeSlotsV2 } from "backend/reservas.web";
+// [FIX A5] Re-export de _extractCheckoutId para cumplir BIBLIA 12.3
+export { _extractCheckoutId } from "backend/booking/bookingCore";
+
+import {
+  _resolveServiceIdInternal,
+  _invalidateCachesInternal,
+  _listTimeSlotsV2,
+  _resolveStaffForSlotInternal,
+} from "backend/reservas.web";
 
 const log = logger;
 
@@ -85,15 +93,13 @@ const COMPENSACIONES_COL = COLLECTIONS.COMPENSACIONES_PENDIENTES;
 
 // =============================================================================
 // BLOQUE 1 — PAIR TOKEN DETERMINISTA
-// [SAGA-03] Primera capa de idempotencia
+// [SAGA-02] Primera capa de idempotencia
 // =============================================================================
 
 function _resolveStablePairToken({ serviceId, resourceId, f1Start, f2Start, email, existingPairToken }) {
-  // Si el payload ya tiene pairToken, usarlo
   const existing = _safeTrim(existingPairToken);
   if (existing) return existing;
 
-  // Generar hash determinista
   const emailHash = _hashKey(_safeTrim(email).toLowerCase());
   const payload = _stableSerialize({
     serviceId: _safeTrim(serviceId),
@@ -135,7 +141,7 @@ async function _bestEffortUnlockAll(lockKeys, lockOwnerId) {
 
 // =============================================================================
 // BLOQUE 4 — COMPENSACION DE BOOKINGS CREADOS
-// [SAGA-05] Compensacion: cancelBookingElevated + CompensacionesPendientes
+// [SAGA-04] cancelBookingElevated + CompensacionesPendientes
 // =============================================================================
 
 async function _compensateCreatedBookings(createdBookings, traceId) {
@@ -238,8 +244,15 @@ export async function executeBookingSaga(unsafePayload) {
       throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Email is required", { traceId });
     }
 
-    // [SAGA-01] Resolver serviceId canonico
-    const rawServiceId = _safeTrim(unsafePayload?.serviceId || metaCita.serviceId || unsafePayload?.primaryServiceId);
+    // [SAGA-01] Resolver serviceId canonico (linkedPhases como fuente primaria)
+    const rawServiceId = _safeTrim(
+      unsafePayload?.serviceId ||
+      metaCita.serviceId ||
+      unsafePayload?.primaryServiceId ||
+      metaCita.primaryServiceId ||
+      unsafePayload?.primaryServiceGuid ||
+      metaCita.primaryServiceGuid
+    );
     const serviceId = await _resolveServiceIdInternal(rawServiceId);
     if (!serviceId || !_looksLikeGuid(serviceId)) {
       throw createBookingError(ERROR_CODES.SERVICE_NOT_FOUND, "Service not found", { traceId, rawServiceId });
@@ -250,7 +263,7 @@ export async function executeBookingSaga(unsafePayload) {
     const serviceConfig = serviceRes?.data || {};
     const isDual = serviceConfig.allowCombine === true && !!serviceConfig.linkedPhases;
 
-    // [SAGA-02] linkedPhases como fuente primaria
+    // [SAGA-01] linkedPhases como fuente primaria
     const linkedPhases = isDual ? serviceConfig.linkedPhases : null;
 
     // Resolver resourceId
@@ -273,15 +286,13 @@ export async function executeBookingSaga(unsafePayload) {
       f2LocalStart = _normalizeLocalIsoStr(slotF2Input.localStartDate || slotF2Input.start || metaCita.f2Start);
       f2LocalEnd = _normalizeLocalIsoStr(slotF2Input.localEndDate || slotF2Input.end || metaCita.f2End);
 
-      // Si no se proporcionaron, calcular SSOT
       if (!f2LocalStart) {
         const f1EndUtc = getUtcDateFromMadridLocal(f1LocalEnd);
         const exposureMs = Math.max(0, Number(serviceConfig.exposureDuration || 0)) * 60 * 1000;
         const f2StartUtc = new Date(f1EndUtc.getTime() + exposureMs);
-        f2LocalStart = getMadridLocalStringNoZ(f2StartUtc);
-
         const phase2Ms = Math.max(0, Number(serviceConfig.phase2Duration || 30)) * 60 * 1000;
         const f2EndUtc = new Date(f2StartUtc.getTime() + phase2Ms);
+        f2LocalStart = getMadridLocalStringNoZ(f2StartUtc);
         f2LocalEnd = getMadridLocalStringNoZ(f2EndUtc);
       }
     }
@@ -298,7 +309,7 @@ export async function executeBookingSaga(unsafePayload) {
 
     // =========================================================================
     // FASE 1: VERIFICAR IDEMPOTENCIA EN CITAS_F2
-    // [SAGA-03] Tercera capa: query por pairToken en CitasF2
+    // [SAGA-02] Tercera capa: query por pairToken en CitasF2
     // =========================================================================
 
     const existingCitaRes = await wixData
@@ -310,10 +321,14 @@ export async function executeBookingSaga(unsafePayload) {
 
     if (existingCitaRes?.items?.length > 0) {
       const existingCita = existingCitaRes.items[0];
-      const existingPaymentStatus = String(existingCita[CITA_FIELDS.STATUS_PAGO] || existingCita.meta?.paymentStatus || "").toUpperCase();
+      const existingPaymentStatus = String(
+        existingCita[CITA_FIELDS.STATUS_PAGO] ||
+        existingCita.meta?.paymentStatus ||
+        existingCita.estadoPago ||
+        ""
+      ).toUpperCase();
 
       if (existingPaymentStatus === ESTADO_PAGO.PENDING_PAYMENT) {
-        // Devolver URL de checkout existente
         log.info("Idempotent duplicate: PENDING_PAYMENT, returning existing checkout", { pairToken, traceId });
         return {
           status: "SUCCESS",
@@ -327,7 +342,6 @@ export async function executeBookingSaga(unsafePayload) {
         };
       }
 
-      // Ya existe con otro estado, devolver datos existentes
       log.info("Idempotent duplicate: existing cita found", { pairToken, traceId, status: existingCita.status });
       return {
         status: "SUCCESS",
@@ -343,7 +357,7 @@ export async function executeBookingSaga(unsafePayload) {
 
     // =========================================================================
     // FASE 2: INICIALIZAR TRANSACCION EN BOOKING_TRANSACTIONS
-    // [SAGA-03] Segunda capa: BookingTransactions
+    // [SAGA-02] Segunda capa: BookingTransactions
     // =========================================================================
 
     const payloadHash = _hashKey(_stableSerialize({
@@ -372,43 +386,38 @@ export async function executeBookingSaga(unsafePayload) {
 
     // =========================================================================
     // FASE 3: REVALIDACION EN TIEMPO REAL
-    // [SAGA-06] skipCache: true antes de locks
+    // [SAGA-05] skipCache: true antes de locks
     // =========================================================================
 
-    const slotsF1 = await _listTimeSlotsV2({
+    const resourceValidation = await _resolveStaffForSlotInternal({
       serviceId,
-      fromLocalDate: `${f1LocalStart.slice(0, 10)}T00:00:00`,
-      toLocalDate: `${f1LocalStart.slice(0, 10)}T23:59:59`,
-      resourceIds: requestedResourceId ? [requestedResourceId] : [],
-    }, { skipCache: true });
+      f1Start: f1LocalStart,
+      f1End: f1LocalEnd,
+      f2Start: isDual ? f2LocalStart : null,
+      f2End: isDual ? f2LocalEnd : null,
+      requestedResourceId: requestedResourceId || null,
+      traceId,
+    });
 
-    const slotF1Found = (slotsF1 || []).find(
-      (s) => _normalizeLocalIsoStr(s.localStartDate) === f1LocalStart
-    );
-
-    if (!slotF1Found) {
-      await _failTransaction(pairToken, "SLOT_UNAVAILABLE");
-      throw createBookingError(ERROR_CODES.SLOT_UNAVAILABLE, "F1 slot is no longer available", { traceId });
+    if (resourceValidation?.status !== "SUCCESS") {
+      await _failTransaction(pairToken, resourceValidation?.error?.code || "SLOT_UNAVAILABLE");
+      throw createBookingError(
+        resourceValidation?.error?.code || ERROR_CODES.SLOT_UNAVAILABLE,
+        resourceValidation?.error?.message || "Slot no longer available",
+        { traceId }
+      );
     }
 
-    // Determinar resourceId final
-    let finalResourceId = requestedResourceId;
-    if (!finalResourceId) {
-      const { _extractResourceIdsFromSlot } = await import("backend/booking/bookingCore");
-      const candidates = _extractResourceIdsFromSlot(slotF1Found);
-      if (candidates.length === 0) {
-        await _failTransaction(pairToken, "STAFF_UNAVAILABLE");
-        throw createBookingError(ERROR_CODES.STAFF_UNAVAILABLE, "No staff available for slot", { traceId });
-      }
-      finalResourceId = candidates[0];
-    }
+    const finalResourceId = resourceValidation.data.resourceId;
+    const validatedSlotF1 = resourceValidation.data.slotF1;
+    const validatedSlotF2 = resourceValidation.data.slotF2;
 
     // =========================================================================
     // FASE 4: ADQUIRIR LOCKS + HEARTBEAT
-    // [SAGA-04] Locks con heartbeat cada 15s
+    // [SAGA-03] Locks con heartbeat cada 15s
     // =========================================================================
 
-    const phases = [{ rawSlot: { ...slotF1Found, serviceId }, localStart: f1LocalStart, localEnd: f1LocalEnd }];
+    const phases = [{ rawSlot: { ...validatedSlotF1, serviceId }, localStart: f1LocalStart, localEnd: f1LocalEnd }];
     if (isDual && f2LocalStart) {
       phases.push({ rawSlot: { serviceId: linkedPhases }, localStart: f2LocalStart, localEnd: f2LocalEnd });
     }
@@ -431,7 +440,7 @@ export async function executeBookingSaga(unsafePayload) {
           }
         }
 
-        // [SAGA-04] Heartbeat para renovar locks
+        // [SAGA-03] Heartbeat para renovar locks
         heartbeatInterval = setInterval(() => {
           lockKeys.forEach((key) => _renewLock(key, lockOwnerId, LOCK_TTL_MS).catch(() => {}));
         }, HEARTBEAT_MS);
@@ -451,7 +460,7 @@ export async function executeBookingSaga(unsafePayload) {
     saga.addStep(
       "CreateBookings",
       async () => {
-        const pristineF1 = await _forceStaffInPristineSlot(slotF1Found, finalResourceId, serviceId, serviceConfig.phase1Duration);
+        const pristineF1 = await _forceStaffInPristineSlot(validatedSlotF1, finalResourceId, serviceId, serviceConfig.phase1Duration);
         if (!pristineF1) {
           throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Failed to build pristine slot F1", { traceId });
         }
@@ -473,8 +482,8 @@ export async function executeBookingSaga(unsafePayload) {
         let bookingF1 = null;
         let bookingF2 = null;
 
-        if (isDual && f2LocalStart) {
-          // [SAGA-07] Creacion paralela con jitter en F2
+        if (isDual && f2LocalStart && validatedSlotF2) {
+          // [SAGA-06] Creacion paralela con jitter en F2
           const createF1 = async () => {
             const res = await createBookingElevated(f1Payload);
             bookingF1 = res?.booking || res;
@@ -483,25 +492,10 @@ export async function executeBookingSaga(unsafePayload) {
           };
 
           const createF2 = async () => {
-            // Jitter de 400-1000ms
+            // [SAGA-06] Jitter de 400-1000ms
             await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
 
-            const slotsF2 = await _listTimeSlotsV2({
-              serviceId: linkedPhases,
-              fromLocalDate: `${f2LocalStart.slice(0, 10)}T00:00:00`,
-              toLocalDate: `${f2LocalStart.slice(0, 10)}T23:59:59`,
-              resourceIds: [finalResourceId],
-            }, { skipCache: true });
-
-            const slotF2Found = (slotsF2 || []).find(
-              (s) => _normalizeLocalIsoStr(s.localStartDate) === f2LocalStart
-            );
-
-            if (!slotF2Found) {
-              throw createBookingError(ERROR_CODES.SLOT_UNAVAILABLE, "F2 slot is no longer available", { traceId });
-            }
-
-            const pristineF2 = await _forceStaffInPristineSlot(slotF2Found, finalResourceId, linkedPhases, serviceConfig.phase2Duration);
+            const pristineF2 = await _forceStaffInPristineSlot(validatedSlotF2, finalResourceId, linkedPhases, serviceConfig.phase2Duration);
             if (!pristineF2) {
               throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Failed to build pristine slot F2", { traceId });
             }
@@ -534,7 +528,13 @@ export async function executeBookingSaga(unsafePayload) {
     );
 
     // PASO 3: CHECKOUT O CONFIRMACION PRESENCIAL
-    const paymentMethod = _safeTrim(unsafePayload?.metodoPago || metaCita.paymentMethod || "PRESENCIAL").toUpperCase();
+    const paymentMethod = _safeTrim(
+      unsafePayload?.metodoPago ||
+      unsafePayload?.paymentMethod ||
+      metaCita.paymentMethod ||
+      metaCita.metodoPago ||
+      "PRESENCIAL"
+    ).toUpperCase();
     const isOnline = paymentMethod === FORMA_PAGO.ONLINE;
 
     saga.addStep(
@@ -559,7 +559,6 @@ export async function executeBookingSaga(unsafePayload) {
 
           return { requiresPayment: true, checkoutUrl, bookingIds };
         } else {
-          // Confirmar presencial
           for (const booking of createdBookings) {
             await confirmOrDeclineBookingElevated(booking.bookingId, { paymentStatus: "NOT_PAID" });
           }
