@@ -629,6 +629,6 @@ export async function executeBookingSaga(unsafePayload) {
       status: "ERROR",
       data: null,
       error: { code: norm.code || ERROR_CODES.UNKNOWN_ERROR, message: norm.message },
-    };
+    }
   }
-}
+};
