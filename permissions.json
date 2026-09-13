@@ -1,0 +1,51 @@
+{
+  "web-methods": {
+    "*": {
+      "*": {
+        "siteOwner": { "invoke": true },
+        "siteMember": { "invoke": true },
+        "anonymous": { "invoke": false }
+      }
+    }
+  },
+  "collections": {
+    "MmAuditLog": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "EventosSistemaFacturacion": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "CajaActual": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "MovimientosCaja": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "HistoricoCierresZ": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "ControlParcialX": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "SecuenciaTickets": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "AsientosContables": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "LineasAsientoContable": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "LibroIVAFacturasExpedidas": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "LibroIVAFacturasRecibidas": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "LibroMayorContableSaldos": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "BookingTransactions": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "CompensacionesPendientes": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "M365GraphSyncQueue": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "SlotLocks": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "DualSlotCache": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "AvailabilityDaysCache": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "CitasF2": { "read": "siteMember", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "MapaStaff": { "read": "siteMember", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "ServiciosCatalogo": { "read": "anyone", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "ComplementosCatalogo": { "read": "anyone", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "InventarioStockVenta": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "MovimientosInventario": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "RegistrosHorariosStaff": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "RateLimitBlocks": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "AlertasOperativas": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "InventarioStockVentaCierre": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "BookingsServiceSyncQueue": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "MM_ProcessedEvents": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "ConfiguracionFiscal": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "never" },
+    "PlanCuentasContables": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" },
+    "ProveedoresLista": { "read": "siteOwner", "write": "siteOwner", "create": "siteOwner", "delete": "siteOwner" }
+  },
+  "_meta": {
+    "version": "v5007.3-FINAL",
+    "base": "BIBLIA_DEFINITIVA v5002.5",
+    "fix": "[FIX-B5] Proteccion de colecciones canonicas. [FIX-SEC] anonymous invoke=false"
+  }
+}
