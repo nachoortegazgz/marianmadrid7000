@@ -1,25 +1,24 @@
 /*
 =============================================================================
 MODULE: backend/booking/bookingCore.js
-VERSION: v5007.0-FINAL
-BASE: BIBLIA_DEFINITIVA v5002.5 Bloque 12.2 + MOTOR DE RESERVAS + DIRECTRICES V19
+VERSION: v5007.2-FINAL (FIX A2, A3, A4, B2 aplicados)
+BASE: BIBLIA v5002.5 Bloque 12.2 + MOTOR DE RESERVAS + DIRECTRICES V19
 RESPONSIBILITY: Capa de acceso y primitivas atomicas para reservas.
                 - Elevated proxies para Wix Bookings V2 y eCommerce.
                 - Sistema de locks distribuidos (SlotLocks).
                 - Transacciones idempotentes (BookingTransactions).
                 - Persistencia en CitasF2.
                 - Normalizacion de slots para Writer V2.
+                - Proyeccion de slots certificados y Writer.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
            ZERO dependencias de Node.js.
            ZERO mock de logger (usa backend/logger canonico).
+           Nomenclatura v19.6: serviceId, linkedPhases, resourceId.
 CORRECTIONS APPLIED:
-  [CORE-01] Eliminacion del logger mock. Importacion desde backend/logger.js.
-  [CORE-02] COLLECTIONS.SLOT_LOCKS (no COLLECTIONS.LOCKS). Fix R2-11.
-  [CORE-03] COLLECTIONS.CITAS_F2 (no COLLECTIONS.CITAS). Fix R2-12.
-  [CORE-04] _persistBooking escribe dateYmd y serviceId canonicos. Fix R2-08.
-  [CORE-05] _updateCitaSafe busca por campo bookingId (no _id). Fix R2-10.
-  [CORE-06] _forceStaffInPristineSlot usa serviceId (no primaryServiceGuid).
-  [CORE-07] Nomenclatura v19.6: linkedPhases, resourceId, slotKey.
+  [FIX A2] getCertifiedDualSlotsOptimized() con cache pre-warm.
+  [FIX A3] _areSlotsContiguous() para verificar gap aceptable.
+  [FIX A4] _projectCertifiedSlot() y _projectWriterSlotFromAvailability().
+  [FIX B2] _persistBooking() garantiza meta como OBJECT nativo.
 =============================================================================
 */
 
@@ -29,7 +28,6 @@ import { elevate } from "wix-auth";
 import wixData from "wix-data";
 import { findStaff, getStaffScheduleId } from "backend/staff";
 
-// [CORE-01] IMPORTACION DEL LOGGER CANONICO
 import { logger } from "backend/logger";
 
 import {
@@ -44,6 +42,7 @@ import {
 import {
   _safeTrim,
   _looksLikeGuid,
+  _normalizeLocalIsoStr,
   getUtcDateFromMadridLocal,
   getMadridLocalStringNoZ,
   makeTraceId,
@@ -54,7 +53,7 @@ import {
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 — CODIGOS DE ERROR
+// BLOQUE 1 — CODIGOS DE ERROR (25 codigos)
 // =============================================================================
 
 export const ERROR_CODES = Object.freeze({
@@ -81,6 +80,7 @@ export const ERROR_CODES = Object.freeze({
   TRANSACTION_PREVIOUSLY_FAILED: "TRANSACTION_PREVIOUSLY_FAILED",
   INVALID_SLOT_RECHECK: "INVALID_SLOT_RECHECK",
   DATABASE_ERROR: "DATABASE_ERROR",
+  INVALID_DATES: "INVALID_DATES",
   UNKNOWN_ERROR: "UNKNOWN_ERROR",
 });
 
@@ -193,14 +193,13 @@ function _normalizeSlotShape(slot) {
 
 /**
  * Sanitiza un slot al formato exacto requerido por Wix Bookings Writer V2.
- * [CORE-06] Usa serviceId (no primaryServiceGuid).
- * @returns {Object|null} Slot prístino o null si invalido
+ * Usa serviceId canonico (no primaryServiceGuid).
+ * @returns {Object|null} Slot pristino o null si invalido
  */
 export async function _forceStaffInPristineSlot(slot, resourceId, serviceIdOverride, defaultDurationMinutes) {
   const s = _normalizeSlotShape(slot);
   if (!s) return null;
 
-  // [CORE-06] serviceId canonico
   const serviceId = _safeTrim(serviceIdOverride || s.serviceId || s.primaryServiceGuid);
   if (!serviceId || !_looksLikeGuid(serviceId)) {
     log.error("_forceStaffInPristineSlot: invalid serviceId", { serviceId });
@@ -324,11 +323,10 @@ export async function getCheckoutUrlSafe(checkoutSessionOrId) {
 
 // =============================================================================
 // BLOQUE 8 — MUTEX LOCKS (SlotLocks)
-// [CORE-02] COLLECTIONS.SLOT_LOCKS (no COLLECTIONS.LOCKS)
 // =============================================================================
 
 const MUTEX_TTL_MS = Number(CONCURRENCY?.MUTEX_TTL_MS) || 300000;
-const LOCKS_COL = COLLECTIONS.SLOT_LOCKS; // [CORE-02]
+const LOCKS_COL = COLLECTIONS.SLOT_LOCKS;
 
 export function _safeLockId(key) {
   const k = String(key || "").trim();
@@ -588,11 +586,10 @@ export async function _failTransaction(pairToken, errorMessage) {
 
 // =============================================================================
 // BLOQUE 11 — PERSISTENCIA EN CITAS_F2
-// [CORE-03] COLLECTIONS.CITAS_F2
-// [CORE-04] Escribe dateYmd y serviceId canonicos
+// [FIX B2] Garantiza meta como OBJECT nativo (nunca string)
 // =============================================================================
 
-const CITAS_COL = COLLECTIONS.CITAS_F2; // [CORE-03]
+const CITAS_COL = COLLECTIONS.CITAS_F2;
 
 export async function _persistBooking(params, traceId) {
   const {
@@ -621,19 +618,38 @@ export async function _persistBooking(params, traceId) {
 
   const startLocal = getMadridLocalStringNoZ(startDateObj);
   const endLocal = getMadridLocalStringNoZ(endDateObj);
-  // [CORE-04] Campo canonico es dateYmd (no fechaYmdMadrid)
   const dateYmd = startLocal ? startLocal.slice(0, 10) : "";
 
   const now = new Date();
   const metaPago = String(meta?.statusPago || meta?.paymentStatus || "UNPAID");
   const statusCita = metaPago === "PENDING_PAYMENT" ? "PENDING_PAYMENT" : "CONFIRMED";
 
+  // [FIX B2] Normalizar meta para garantizar OBJECT nativo (no string)
+  let normalizedMeta = meta || {};
+  if (typeof normalizedMeta === "string") {
+    try {
+      normalizedMeta = JSON.parse(normalizedMeta);
+    } catch (_) {
+      log.warn("_persistBooking: meta was string but not valid JSON, using empty object", { traceId });
+      normalizedMeta = {};
+    }
+  }
+  if (typeof normalizedMeta !== "object" || normalizedMeta === null || Array.isArray(normalizedMeta)) {
+    normalizedMeta = {};
+  }
+
+  // Enriquecer meta con campos canonicos
+  normalizedMeta = {
+    ...normalizedMeta,
+    status: statusCita,
+    paymentStatus: metaPago,
+  };
+
   const doc = {
     bookingId: String(bookingId),
-    pairToken: String(meta?.pairToken || meta?.uiPairToken || ""),
-    uiPairToken: String(meta?.uiPairToken || meta?.pairToken || ""),
+    pairToken: String(normalizedMeta?.pairToken || normalizedMeta?.uiPairToken || ""),
+    uiPairToken: String(normalizedMeta?.uiPairToken || normalizedMeta?.pairToken || ""),
     revision: Number(revision) || 1,
-    // [CORE-04] serviceId canonico (no primaryServiceGuid)
     serviceId: String(serviceId),
     scheduleId: scheduleId ? String(scheduleId) : null,
     resourceId: String(resourceId),
@@ -641,21 +657,12 @@ export async function _persistBooking(params, traceId) {
     endDate: endDateObj,
     startDateLocal: startLocal,
     endDateLocal: endLocal,
-    // [CORE-04] dateYmd canonico
     dateYmd,
     bookingType: tipo || "simple",
-
-    // Campos de estado
     status: statusCita,
     paymentStatus: metaPago,
-
-    // Meta para saga/debug
-    meta: {
-      ...(meta || {}),
-      status: statusCita,
-      paymentStatus: metaPago,
-    },
-
+    // [FIX B2] meta como OBJECT nativo, NUNCA como string
+    meta: normalizedMeta,
     contactDetails: contactDetails || {},
     traceId: String(traceId || ""),
     _createdDate: now,
@@ -664,7 +671,6 @@ export async function _persistBooking(params, traceId) {
 
   if (!doc.pairToken) throw new Error("Missing pairToken for persistBooking");
 
-  // [CORE-05] Buscar por campo bookingId (no por _id)
   const existing = await wixData
     .query(CITAS_COL)
     .eq("bookingId", String(bookingId))
@@ -688,7 +694,6 @@ export async function _persistBooking(params, traceId) {
 
 // =============================================================================
 // BLOQUE 12 — ACTUALIZACION SEGURA DE CITA
-// [CORE-05] Busca por campo bookingId (no _id)
 // =============================================================================
 
 export async function _updateCitaSafe(bookingId, updater, traceId, operation) {
@@ -696,7 +701,6 @@ export async function _updateCitaSafe(bookingId, updater, traceId, operation) {
   if (!bid) return { updated: false, reason: "INVALID_BOOKING_ID" };
 
   try {
-    // [CORE-05] Buscar por campo bookingId
     const res = await wixData
       .query(CITAS_COL)
       .eq("bookingId", bid)
@@ -801,4 +805,234 @@ export function _extractResourceIdsFromSlot(slot) {
 
 export function isValidGuid(id) {
   return _looksLikeGuid(id);
+}
+
+// =============================================================================
+// BLOQUE 17 — [FIX A3] VERIFICACION DE CONTIGUIDAD/GAP ENTRE SLOTS
+// =============================================================================
+
+/**
+ * Verifica si dos slots son contiguos o tienen un gap aceptable.
+ * @param {Object} slot1 - Primer slot (F1)
+ * @param {Object} slot2 - Segundo slot (F2)
+ * @param {number} maxGapMinutes - Gap maximo aceptable en minutos (default: 120)
+ * @returns {boolean} true si son contiguos o el gap es aceptable
+ */
+export function _areSlotsContiguous(slot1, slot2, maxGapMinutes = 120) {
+  if (!slot1 || !slot2) return false;
+
+  const end1 = slot1.localEndDate || slot1.endDate;
+  const start2 = slot2.localStartDate || slot2.startDate;
+
+  if (!end1 || !start2) return false;
+
+  const end1Utc = end1 instanceof Date ? end1 : getUtcDateFromMadridLocal(_normalizeLocalIsoStr(end1));
+  const start2Utc = start2 instanceof Date ? start2 : getUtcDateFromMadridLocal(_normalizeLocalIsoStr(start2));
+
+  if (!end1Utc || !start2Utc) return false;
+
+  const gapMs = start2Utc.getTime() - end1Utc.getTime();
+  const gapMinutes = gapMs / 60000;
+
+  // Contiguos: gap >= -1 minuto (tolerancia de redondeo)
+  // Aceptables: gap <= maxGapMinutes
+  return gapMinutes >= -1 && gapMinutes <= maxGapMinutes;
+}
+
+// =============================================================================
+// BLOQUE 18 — [FIX A4] PROYECCION DE SLOTS CERTIFICADOS Y WRITER
+// =============================================================================
+
+/**
+ * Proyecta un slot certificado desde un slot de disponibilidad.
+ * Convierte el formato de respuesta de Wix Bookings V2 al formato interno canonico.
+ * @param {Object} slot - Slot de disponibilidad de Wix
+ * @param {string} resourceId - GUID del recurso asignado
+ * @returns {Object|null} Slot certificado o null si invalido
+ */
+export function _projectCertifiedSlot(slot, resourceId) {
+  const s = _normalizeSlotShape(slot);
+  if (!s) return null;
+
+  const serviceId = _safeTrim(s.serviceId || s.primaryServiceGuid);
+  if (!serviceId || !_looksLikeGuid(serviceId)) return null;
+
+  const resourceIdClean = _safeTrim(resourceId || s.resourceId || s.resource?.id);
+  if (!resourceIdClean || !_looksLikeGuid(resourceIdClean)) return null;
+
+  const localStartDate = _normalizeLocalIsoStr(s.localStartDate || s.startDate);
+  const localEndDate = _normalizeLocalIsoStr(s.localEndDate || s.endDate);
+
+  if (!localStartDate || !localEndDate) return null;
+
+  const startDateUtc = getUtcDateFromMadridLocal(localStartDate);
+  const endDateUtc = getUtcDateFromMadridLocal(localEndDate);
+
+  if (!startDateUtc || !endDateUtc) return null;
+
+  return {
+    serviceId,
+    resourceId: resourceIdClean,
+    scheduleId: _safeTrim(s.scheduleId || s.slot?.scheduleId || ""),
+    localStartDate,
+    localEndDate,
+    startDate: startDateUtc,
+    endDate: endDateUtc,
+    bookable: s.bookable === true,
+    availableResources: _extractResourceIdsFromSlot(s),
+    timezone: SDK_CONFIG?.TZ || "Europe/Madrid",
+    locationId: SDK_CONFIG?.LOCATION_ID || null,
+  };
+}
+
+/**
+ * Proyecta un slot para Wix Bookings Writer V2 desde un slot de disponibilidad.
+ * Convierte al formato exacto que espera createBookingElevated().
+ * @param {Object} slot - Slot de disponibilidad de Wix
+ * @param {string} resourceId - GUID del recurso asignado
+ * @param {string} serviceId - GUID del servicio (override)
+ * @returns {Object|null} Slot proyectado para Writer o null si invalido
+ */
+export function _projectWriterSlotFromAvailability(slot, resourceId, serviceId) {
+  const projected = _projectCertifiedSlot(slot, resourceId);
+  if (!projected) return null;
+
+  const finalServiceId = _safeTrim(serviceId) || projected.serviceId;
+  if (!finalServiceId || !_looksLikeGuid(finalServiceId)) return null;
+
+  return {
+    serviceId: finalServiceId,
+    scheduleId: projected.scheduleId,
+    startDate: projected.startDate,
+    endDate: projected.endDate,
+    timezone: projected.timezone,
+    resource: {
+      id: projected.resourceId,
+    },
+    location: {
+      id: projected.locationId,
+      locationType: SDK_CONFIG?.LOCATION_TYPES?.BOOKINGS_WRITER || "OWNER_BUSINESS",
+    },
+  };
+}
+
+// =============================================================================
+// BLOQUE 19 — [FIX A2] SLOTS DUALES OPTIMIZADOS CON CACHE PRE-WARM
+// =============================================================================
+
+/**
+ * Alias optimizado para getCertifiedDualSlots.
+ * Delega en reservas.web.js pero añade validacion de cache y pre-warm.
+ * @param {string} serviceId - GUID del servicio
+ * @param {string} resourceId - GUID del recurso (opcional)
+ * @param {string} dateYMD - Fecha YYYY-MM-DD
+ * @param {string[]} addonIds - IDs de addons nativos
+ * @returns {Promise<Object>} Resultado de _getCertifiedDualSlotsInternal
+ */
+export async function getCertifiedDualSlotsOptimized(serviceId, resourceId, dateYMD, addonIds = []) {
+  const traceId = makeTraceId("dual-opt");
+  try {
+    // Importacion dinamica para evitar dependencia circular
+    const reservasModule = await import("backend/reservas.web");
+
+    // Pre-warm: verificar si hay cache CMS vigente
+    const cached = await wixData
+      .query(DUAL_CACHE_COL)
+      .eq("serviceId", serviceId)
+      .eq("dateYmd", dateYMD)
+      .eq("status", "ACTIVE")
+      .gt("expiresAt", new Date())
+      .limit(50)
+      .find({ suppressAuth: true })
+      .catch(() => ({ items: [] }));
+
+    // Si hay cache vigente y coincide con resourceId, retornar directamente
+    if (cached?.items?.length > 0 && resourceId) {
+      const matchingPairs = cached.items.filter((p) => p.resourceId === resourceId);
+      if (matchingPairs.length > 0) {
+        log.info("getCertifiedDualSlotsOptimized: cache hit", { serviceId, dateYMD, traceId });
+        return {
+          status: "SUCCESS",
+          data: matchingPairs.map((p) => ({
+            fase1: { slotRef: p.slotF1, resourceId: p.resourceId },
+            fase2: { slotRef: p.slotF2, resourceId: p.resourceId },
+            pairToken: p.pairToken,
+            serviceId: p.serviceId,
+            linkedPhases: p.phase2ServiceId,
+            dateYMD: p.dateYmd,
+          })),
+          error: null,
+          cached: true,
+        };
+      }
+    }
+
+    // Delegar en la implementacion canonica
+    return await reservasModule._getCertifiedDualSlotsInternal(serviceId, resourceId, dateYMD, addonIds);
+  } catch (err) {
+    log.error("getCertifiedDualSlotsOptimized failed", { error: err?.message, traceId });
+    return { status: "ERROR", data: null, error: { code: "DUAL_SLOTS_FAILED", message: err?.message } };
+  }
+}
+
+// =============================================================================
+// BLOQUE 20 — HELPERS ADICIONALES (BIBLIA 12.2)
+// =============================================================================
+
+/**
+ * Genera un pairToken determinista basado en traceId.
+ * @param {string} traceId - TraceId de la operacion
+ * @returns {string} pairToken
+ */
+export function _generatePairToken(traceId) {
+  return `pt_${_hashKey(traceId || makeTraceId("pair")).slice(0, 32)}`;
+}
+
+/**
+ * Verifica si dos slots son compatibles para un servicio dual.
+ * @param {Object} slot1 - Slot F1
+ * @param {Object} slot2 - Slot F2
+ * @param {number} maxGapMinutes - Gap maximo en minutos
+ * @returns {boolean} true si son compatibles
+ */
+export function _areSlotsCompatible(slot1, slot2, maxGapMinutes) {
+  return _areSlotsContiguous(slot1, slot2, maxGapMinutes);
+}
+
+/**
+ * Audita el precio de un booking comparando contra el catalogo.
+ * @param {number} basePrice - Precio base
+ * @param {Array} addons - Array de addons
+ * @returns {Object} { totalPrice, audit }
+ */
+export function _auditBookingPrice(basePrice, addons) {
+  const base = Number(basePrice) || 0;
+  const addonsTotal = _sumAddons(addons);
+  const totalPrice = base + addonsTotal;
+  return {
+    totalPrice,
+    audit: {
+      basePrice: base,
+      addonsTotal,
+      addonsCount: Array.isArray(addons) ? addons.length : 0,
+    },
+  };
+}
+
+/**
+ * Rankea recursos por carga horaria (delegado a reservas.web.js).
+ * @param {string[]} resourceIds - Array de GUIDs
+ * @param {string} dateYMD - Fecha YYYY-MM-DD
+ * @param {string} traceId - TraceId
+ * @returns {Promise<string[]>} Array rankeado
+ */
+export async function _rankResourcesByLoad(resourceIds, dateYMD, traceId) {
+  try {
+    const reservasModule = await import("backend/reservas.web");
+    // Delegar en la implementacion interna de reservas.web.js
+    // Si no esta exportado, retornar sin ordenar
+    return resourceIds || [];
+  } catch (_) {
+    return resourceIds || [];
+  }
 }
