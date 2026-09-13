@@ -1,7 +1,7 @@
 /*
 =============================================================================
 MODULE: backend/facturasRecibidas.web.js
-VERSION: v5007.2-FINAL (FIX C2 — MODULO NUEVO)
+VERSION: v5007.3-FINAL (D2/D3 integrado)
 BASE: DOSSIER CAJA §17 + BIBLIA v5002.5 + ESQUEMA CMS 4.22
 RESPONSIBILITY: Registro de facturas recibidas de proveedores.
                 Genera asiento contable y actualiza LibroIVAFacturasRecibidas.
@@ -12,6 +12,8 @@ CORRECTIONS APPLIED:
   [FR-02] Validacion de NIF proveedor.
   [FR-03] Asiento contable automatico en partida doble.
   [FR-04] Integracion con movimiento de caja si se paga inmediatamente.
+  [FIX-D2] normalizeError local eliminado. Se importa de bookingCore.js.
+  [FIX-D3] _logAuditEvent local eliminado. Se importa de audit.js.
 =============================================================================
 */
 
@@ -40,11 +42,17 @@ import { requireAdmin, requireCajero } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";
 import { registerManualTransaction } from "backend/cajas.web";
 
+// [FIX-D2] Import canonico de normalizacion de errores
+import { normalizeError } from "backend/booking/bookingCore";
+
+// [FIX-D3] Import canonico de auditoria centralizada
+import { logAuditEvent } from "backend/audit";
+
 const log = logger;
 
-// =============================================================================
+// ============================================================================
 // VALIDACION DE NIF
-// =============================================================================
+// ============================================================================
 
 function _isValidNIF(nif) {
   const n = _safeTrim(nif).toUpperCase();
@@ -52,12 +60,9 @@ function _isValidNIF(nif) {
   return /^[A-Z0-9]{9}$/.test(n) || /^[A-Z]{1}[0-9]{8}$/.test(n);
 }
 
-// =============================================================================
+// ============================================================================
 // WEBMETHOD: REGISTRAR FACTURA RECIBIDA
-// [FR-01] Idempotencia por receptionNumber
-// [FR-02] Validacion de NIF proveedor
-// [FR-03] Asiento contable automatico
-// =============================================================================
+// ============================================================================
 
 export const registerReceivedInvoice = webMethod(Permissions.SiteMember, async (payload) => {
   const traceId = payload?.traceId || makeTraceId("rec-inv");
@@ -69,7 +74,6 @@ export const registerReceivedInvoice = webMethod(Permissions.SiteMember, async (
       return { status: "ERROR", data: null, error: { code: "INVALID_RECEPTION_NUMBER", message: "receptionNumber requerido" } };
     }
 
-    // [FR-01] Idempotencia
     const existingRes = await wixData
       .query(COLLECTIONS.LIBRO_IVA_FACTURAS_RECIBIDAS)
       .eq("receptionNumber", receptionNumber)
@@ -80,7 +84,6 @@ export const registerReceivedInvoice = webMethod(Permissions.SiteMember, async (
       return { status: "SUCCESS", data: existingRes.items[0], error: null, idempotent: true };
     }
 
-    // [FR-02] Validar NIF proveedor
     const supplierTaxId = _safeTrim(payload?.supplierTaxId).toUpperCase();
     if (!_isValidNIF(supplierTaxId)) {
       return { status: "ERROR", data: null, error: { code: "INVALID_NIF", message: "NIF proveedor invalido" } };
@@ -124,7 +127,6 @@ export const registerReceivedInvoice = webMethod(Permissions.SiteMember, async (
     const paymentMethod = _safeTrim(payload?.paymentMethod).toUpperCase() || FORMA_PAGO.EFECTIVO;
     const paymentDate = _readDate(payload?.paymentDate) || null;
 
-    // Insertar en LibroIVAFacturasRecibidas
     const invoiceRecord = {
       _id: receptionNumber,
       receptionNumber,
@@ -150,10 +152,8 @@ export const registerReceivedInvoice = webMethod(Permissions.SiteMember, async (
 
     const saved = await wixData.insert(COLLECTIONS.LIBRO_IVA_FACTURAS_RECIBIDAS, invoiceRecord, { suppressAuth: true });
 
-    // [FR-03] Generar asiento contable automatico
     await _generateExpenseAccountingEntry(saved, traceId);
 
-    // [FR-04] Si se paga inmediatamente, registrar movimiento de caja
     if (paymentDate && paymentMethod !== "PENDIENTE") {
       await registerManualTransaction({
         amount: totalInvoiceAmount,
@@ -167,19 +167,29 @@ export const registerReceivedInvoice = webMethod(Permissions.SiteMember, async (
       });
     }
 
-    await _logAuditEvent("RECEIVED_INVOICE_REGISTERED", "INFO", `Factura recibida registrada: ${receptionNumber}`, { receptionNumber, supplierTaxId, totalInvoiceAmount, traceId }, traceId, receptionNumber);
+    // [FIX-D3] Usar logAuditEvent canonico de audit.js
+    await logAuditEvent(
+      "RECEIVED_INVOICE_REGISTERED",
+      "INFO",
+      `Factura recibida registrada: ${receptionNumber}`,
+      { receptionNumber, supplierTaxId, totalInvoiceAmount, traceId },
+      traceId,
+      receptionNumber,
+      "backend/facturasRecibidas.web.js"
+    );
 
     return { status: "SUCCESS", data: saved, error: null };
   } catch (err) {
+    // [FIX-D2] Usar normalizeError canonico de bookingCore.js
     const norm = normalizeError(err);
     log.error("registerReceivedInvoice failed", { code: norm.code, error: norm.message, traceId });
     return { status: "ERROR", data: null, error: { code: norm.code || "REC_INV_FAIL", message: norm.message } };
   }
 });
 
-// =============================================================================
+// ============================================================================
 // GENERAR ASIENTO CONTABLE DE GASTO
-// =============================================================================
+// ============================================================================
 
 async function _generateExpenseAccountingEntry(invoice, traceId) {
   try {
@@ -232,7 +242,6 @@ async function _generateExpenseAccountingEntry(invoice, traceId) {
     const lines = [];
     let lineNum = 1;
 
-    // Debe: Cuenta de gasto
     lines.push({
       _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
       lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
@@ -253,7 +262,6 @@ async function _generateExpenseAccountingEntry(invoice, traceId) {
       _createdDate: new Date(),
     });
 
-    // Debe: IVA soportado
     if (invoice.inputTaxAmount > 0) {
       lines.push({
         _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
@@ -276,7 +284,6 @@ async function _generateExpenseAccountingEntry(invoice, traceId) {
       });
     }
 
-    // Haber: Caja/Banco/Proveedor
     lines.push({
       _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
       lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
@@ -305,9 +312,9 @@ async function _generateExpenseAccountingEntry(invoice, traceId) {
   }
 }
 
-// =============================================================================
+// ============================================================================
 // WEBMETHOD: LISTAR FACTURAS RECIBIDAS
-// =============================================================================
+// ============================================================================
 
 export const listReceivedInvoices = webMethod(Permissions.SiteMember, async (options = {}) => {
   const traceId = options?.traceId || makeTraceId("list-rec-inv");
@@ -341,40 +348,3 @@ export const listReceivedInvoices = webMethod(Permissions.SiteMember, async (opt
     return { status: "ERROR", data: null, error: _toPublicError(err, "LIST_REC_INV_FAIL") };
   }
 });
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-async function _logAuditEvent(tipoEvento, level, message, data = {}, traceId, entityId = "system") {
-  try {
-    const logId = `AUDIT_${_normalizeIdPart(tipoEvento, 30)}_${_normalizeIdPart(entityId, 20)}_${Date.now()}`;
-    await wixData.insert(
-      COLLECTIONS.MM_AUDIT_LOG,
-      {
-        _id: logId,
-        eventType: tipoEvento,
-        level,
-        message,
-        data,
-        resourceId: "SYSTEM",
-        source: "backend/facturasRecibidas.web.js",
-        loggedAt: new Date(),
-        traceId,
-      },
-      { suppressAuth: true }
-    ).catch(() => null);
-  } catch (err) {
-    log.error("Failed to write to AUDIT_LOG", { error: err?.message, traceId });
-  }
-}
-
-function normalizeError(err) {
-  if (err && typeof err === "object" && err.code) {
-    return { code: String(err.code), message: String(err.message || "Unknown error") };
-  }
-  if (err instanceof Error) {
-    return { code: err.code || "UNKNOWN_ERROR", message: err.message || "Unknown error" };
-  }
-  return { code: "UNKNOWN_ERROR", message: String(err || "Unknown error") };
-}

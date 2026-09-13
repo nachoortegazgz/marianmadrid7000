@@ -1,17 +1,18 @@
 /*
 =============================================================================
 MODULE: backend/events.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.3-FINAL (D3 integrado)
 BASE: Modulos optimizados 3 + BIBLIA v5002.5 + DIRECTRICES V19
 RESPONSIBILITY: Server-to-server native webhooks for Wix Bookings V2 and
                 Wix eCommerce V2 with exact-indexed queries, bounded
                 execution, and full idempotency.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
-CORRECTIONS APPLIED (Rondas 1-3):
+CORRECTIONS APPLIED:
   [R2-09] Idempotencia en wixEcom_onOrderCanceled.
   [R2-10] _updateCitaStatus busca por campo bookingId (no _id).
   [R2-13] Sin fallback string en PROCESSED_EVENTS_COL.
   [R2-21] Promise.allSettled para actualizar multiples citas en paralelo.
+  [FIX-D3] _logAuditEvent local eliminado. Se importa logAuditEventWithTimeout de audit.js.
   [EVENTS-01] Handlers idempotentes mediante registro de eventId.
   [EVENTS-02] Validacion de estructura de eventos entrantes.
   [EVENTS-03] Control de errores y reintentos con backoff.
@@ -40,13 +41,15 @@ import {
   SDK_CONFIG,
 } from "backend/internalConfig";
 
-import { logger } from "backend/logger";
-import { normalizeError, _updateCitaSafe } from "backend/booking/bookingCore";
+import { logger, normalizeError, _updateCitaSafe } from "backend/booking/bookingCore";
 import { registerBookingPayment, queueFiscalRecovery } from "backend/cajas.web";
 import {
   recordOnlineInventoryOrderInternal,
   recordOnlineInventoryRefundInternal,
 } from "backend/inventario.web";
+
+// [FIX-D3] Import canonico de auditoria centralizada con timeout
+import { logAuditEventWithTimeout } from "backend/audit";
 
 const log = logger;
 
@@ -115,41 +118,10 @@ async function markEventAsProcessed(eventId, eventType, traceId, metadata = {}) 
   }
 }
 
-// ============================================================================
-// ERROR HANDLING & AUDIT
-// ============================================================================
-
 function _handleError(error, context, traceId) {
   const normalized = normalizeError(error);
   log.error(`Error in ${context}`, { error: normalized.message, traceId });
   return { code: normalized.code, message: normalized.message };
-}
-
-async function _logAuditEvent(tipoEvento, level, message, data = {}, traceId, entityId = "system") {
-  try {
-    const safeEntity = _normalizeIdPart(entityId, 40);
-    const safeTrace = _normalizeIdPart(traceId, 40);
-    const logId = `AUDIT_${_normalizeIdPart(tipoEvento, 30)}_${safeEntity}_${safeTrace}`;
-    await withTimeout(
-      wixData.insert(
-        COLLECTIONS.MM_AUDIT_LOG, {
-          _id: logId,
-          eventType: tipoEvento,
-          level,
-          message,
-          data,
-          resourceId: "SYSTEM",
-          source: "backend/events.js",
-          loggedAt: new Date(),
-          traceId,
-        }, { suppressAuth: true }
-      ).catch(() => null),
-      API_TIMEOUT_MS,
-      "logAuditEvent"
-    );
-  } catch (err) {
-    log.error("Failed to write to AUDIT_LOG", { error: err?.message || String(err), traceId });
-  }
 }
 
 // ============================================================================
@@ -348,7 +320,9 @@ export async function wixEcom_onOrderPaymentStatusUpdated(event) {
 
     await recordOnlineInventoryOrderInternal(order, traceId).catch((inventoryError) => {
       log.error("Online inventory mirror failed", {
-        orderId, traceId, error: inventoryError?.message || String(inventoryError),
+        orderId,
+        traceId,
+        error: inventoryError?.message || String(inventoryError),
       });
     });
 
@@ -436,21 +410,28 @@ export async function wixEcom_onOrderPaymentStatusUpdated(event) {
       lastError: ledgerRes?.error?.message || "LEDGER_REGISTRATION_FAILED",
     });
 
-    await _logAuditEvent(
-      "LEDGER_REGISTRATION_FAILED", "ERROR",
+    // [FIX-D3] Usar logAuditEventWithTimeout canonico de audit.js
+    await logAuditEventWithTimeout(
+      "LEDGER_REGISTRATION_FAILED",
+      "ERROR",
       `Ledger registration queued for order ${orderId}`,
       { orderId, bookingIds, ledgerError: ledgerRes?.error || "Unknown error", traceId },
-      traceId, orderId
+      traceId,
+      orderId,
+      "backend/events.js"
     );
 
     return { status: "OK" };
   } catch (error) {
     const normalized = _handleError(error, "wixEcom_onOrderPaymentStatusUpdated", traceId);
-    await _logAuditEvent(
-      "WEBHOOK_CRITICAL_ERROR", "ERROR",
+    await logAuditEventWithTimeout(
+      "WEBHOOK_CRITICAL_ERROR",
+      "ERROR",
       `Critical error in webhook: ${normalized.message}`,
       { error: normalized.message, traceId },
-      traceId
+      traceId,
+      "system",
+      "backend/events.js"
     );
     return { status: "OK" };
   }
@@ -468,13 +449,22 @@ export async function wixEcom_onOrderRefunded(event) {
     if (!refundObj || orderId === "unknown") { return { status: "OK" }; }
 
     const rawAmount = typeof refundObj?.amount === "object" && refundObj?.amount !== null ?
-      refundObj.amount.amount : refundObj?.amount ?? 0;
+      refundObj.amount.amount :
+      refundObj?.amount ?? 0;
     const refundAmount = Number(rawAmount) || 0;
     if (refundAmount <= 0) { return { status: "OK" }; }
 
     const refundId = String(refundObj?._id || refundObj?.id || "").trim();
     if (!refundId) {
-      await _logAuditEvent("REFUND_ID_MISSING", "ERROR", `Refund without stable identifier for order ${orderId}`, { orderId, traceId }, traceId, orderId);
+      await logAuditEventWithTimeout(
+        "REFUND_ID_MISSING",
+        "ERROR",
+        `Refund without stable identifier for order ${orderId}`,
+        { orderId, traceId },
+        traceId,
+        orderId,
+        "backend/events.js"
+      );
       return { status: "OK" };
     }
 
@@ -490,39 +480,82 @@ export async function wixEcom_onOrderRefunded(event) {
     const originalMovement = originalMovementRes.items?.[0];
     if (!originalMovement) {
       await queueFiscalRecovery({
-        bookingIds: "", amount: -refundAmount, paymentMethod: FORMA_PAGO.ONLINE,
-        transactionId, orderId, refundId,
-        origin: "WIX_ECOM_REFUND_WEBHOOK", concept: `Refund - Order ${orderId}`,
-        resourceId: "online", tipoMovimiento: TIPO_MOVIMIENTO.REEMBOLSO,
-        phase: "WAIT_FOR_ORIGINAL_ORDER_LEDGER", traceId,
+        bookingIds: "",
+        amount: -refundAmount,
+        paymentMethod: FORMA_PAGO.ONLINE,
+        transactionId,
+        orderId,
+        refundId,
+        origin: "WIX_ECOM_REFUND_WEBHOOK",
+        concept: `Refund - Order ${orderId}`,
+        resourceId: "online",
+        tipoMovimiento: TIPO_MOVIMIENTO.REEMBOLSO,
+        phase: "WAIT_FOR_ORIGINAL_ORDER_LEDGER",
+        traceId,
         lastError: "ORIGINAL_ORDER_LEDGER_MISSING",
       });
-      await _logAuditEvent("REFUND_WAITING_FOR_ORIGINAL_LEDGER", "ERROR", `Refund queued before original ledger for order ${orderId}`, { orderId, refundId, traceId }, traceId, orderId);
+      await logAuditEventWithTimeout(
+        "REFUND_WAITING_FOR_ORIGINAL_LEDGER",
+        "ERROR",
+        `Refund queued before original ledger for order ${orderId}`,
+        { orderId, refundId, traceId },
+        traceId,
+        orderId,
+        "backend/events.js"
+      );
       return { status: "OK" };
     }
 
     const originalAmount = Number(originalMovement.totalAmount || 0);
-    const linkedBookingIds = _normalizeBookingIds(originalMovement.reservaIdVinculada || originalMovement.reservationIdLinked);
+    const linkedBookingIds = _normalizeBookingIds(
+      originalMovement.reservaIdVinculada || originalMovement.reservationIdLinked
+    );
 
-    const refundRestockInfo = event?.sideEffects?.restockInfo || event?.data?.sideEffects?.restockInfo || refundObj?.sideEffects?.restockInfo || null;
-    const refundOrder = event?.order || event?.data?.order || { _id: orderId, lineItems: event?.lineItems || event?.data?.lineItems || [] };
+    const refundRestockInfo = event?.sideEffects?.restockInfo ||
+      event?.data?.sideEffects?.restockInfo ||
+      refundObj?.sideEffects?.restockInfo ||
+      null;
+
+    const refundOrder = event?.order ||
+      event?.data?.order || { _id: orderId, lineItems: event?.lineItems || event?.data?.lineItems || [] };
 
     try {
       const inventoryRefund = await recordOnlineInventoryRefundInternal(refundOrder, refundObj, refundRestockInfo, traceId);
       if (inventoryRefund?.status === "SKIPPED" && inventoryRefund?.reason !== "NO_CONFIRMED_RESTOCK") {
-        await _logAuditEvent("REFUND_INVENTORY_TRACE_SKIPPED", "WARN", `Inventory trace skipped for refund ${refundId}`, { orderId, refundId, reason: inventoryRefund.reason, traceId }, traceId, orderId);
+        await logAuditEventWithTimeout(
+          "REFUND_INVENTORY_TRACE_SKIPPED",
+          "WARN",
+          `Inventory trace skipped for refund ${refundId}`,
+          { orderId, refundId, reason: inventoryRefund.reason, traceId },
+          traceId,
+          orderId,
+          "backend/events.js"
+        );
       }
     } catch (inventoryRefundError) {
-      await _logAuditEvent("REFUND_INVENTORY_TRACE_FAILED", "ERROR", `Inventory trace failed for refund ${refundId}`, { orderId, refundId, error: inventoryRefundError?.message || String(inventoryRefundError), traceId }, traceId, orderId);
+      await logAuditEventWithTimeout(
+        "REFUND_INVENTORY_TRACE_FAILED",
+        "ERROR",
+        `Inventory trace failed for refund ${refundId}`,
+        { orderId, refundId, error: inventoryRefundError?.message || String(inventoryRefundError), traceId },
+        traceId,
+        orderId,
+        "backend/events.js"
+      );
     }
 
     const ledgerRes = await registerBookingPayment(
       linkedBookingIds.join(",") || null,
       -refundAmount,
       FORMA_PAGO.ONLINE, {
-        concept: `Refund - Order ${orderId}`, resourceId: "online", traceId,
-        transactionId, orderId, refundId,
-        origen: "WIX_ECOM_REFUND_WEBHOOK", tipoMovimiento: TIPO_MOVIMIENTO.REEMBOLSO,
+        concept: `Refund - Order ${orderId}`,
+        resourceId: "online",
+        traceId,
+        transactionId,
+        orderId,
+        refundId,
+        origen: "WIX_ECOM_REFUND_WEBHOOK",
+        tipoMovimiento: TIPO_MOVIMIENTO.REEMBOLSO,
       }
     );
 
@@ -530,13 +563,28 @@ export async function wixEcom_onOrderRefunded(event) {
       await _markCitasRefundedByBookingIds(linkedBookingIds, orderId, refundId, false, traceId);
     } else {
       await queueFiscalRecovery({
-        bookingIds: linkedBookingIds.join(","), amount: -refundAmount,
-        paymentMethod: FORMA_PAGO.ONLINE, transactionId, orderId, refundId,
-        origin: "WIX_ECOM_REFUND_WEBHOOK", concept: `Refund - Order ${orderId}`,
-        resourceId: "online", tipoMovimiento: TIPO_MOVIMIENTO.REEMBOLSO, traceId,
+        bookingIds: linkedBookingIds.join(","),
+        amount: -refundAmount,
+        paymentMethod: FORMA_PAGO.ONLINE,
+        transactionId,
+        orderId,
+        refundId,
+        origin: "WIX_ECOM_REFUND_WEBHOOK",
+        concept: `Refund - Order ${orderId}`,
+        resourceId: "online",
+        tipoMovimiento: TIPO_MOVIMIENTO.REEMBOLSO,
+        traceId,
         lastError: ledgerRes?.error?.message || "REFUND_LEDGER_REGISTRATION_FAILED",
       });
-      await _logAuditEvent("REFUND_LEDGER_REGISTRATION_FAILED", "ERROR", `Refund ledger queued for order ${orderId}`, { orderId, refundId, traceId }, traceId, orderId);
+      await logAuditEventWithTimeout(
+        "REFUND_LEDGER_REGISTRATION_FAILED",
+        "ERROR",
+        `Refund ledger queued for order ${orderId}`,
+        { orderId, refundId, traceId },
+        traceId,
+        orderId,
+        "backend/events.js"
+      );
       return { status: "OK" };
     }
 
@@ -551,7 +599,8 @@ export async function wixEcom_onOrderRefunded(event) {
     );
 
     const refundedTotal = (refundsRes?.items || []).reduce(
-      (sum, movement) => sum + Math.abs(Number(movement?.accountingAmount || movement?.totalAmount || 0)), 0
+      (sum, movement) => sum + Math.abs(Number(movement?.accountingAmount || movement?.totalAmount || 0)),
+      0
     );
     const fullyRefunded = originalAmount > 0 && refundedTotal >= originalAmount;
     await _markCitasRefundedByBookingIds(linkedBookingIds, orderId, refundId, fullyRefunded, traceId);
