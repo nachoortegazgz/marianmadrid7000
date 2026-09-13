@@ -1,47 +1,55 @@
 /*
 =============================================================================
 MODULE: backend/security.js
-VERSION: v5007.0-FINAL
-BASE: BIBLIA_DEFINITIVA v5002.5 Bloque 12.8 + DIRECTRICES V19
-RESPONSIBILITY: Motor de seguridad del ecosistema Marian Madrid.
-                - Rate limiter con ventana deslizante en memoria.
-                - Bloqueo persistente cross-instancia (RateLimitBlocks).
-                - Verificacion de roles (ADMIN, CAJERO, ESTILISTA).
-                - Funciones require* para WebMethods.
+VERSION: v5007.2-FINAL (FIX B1 aplicado)
+BASE: BIBLIA v5002.5 Bloque 12.8 + DIRECTRICES V19
+RESPONSIBILITY: Motor de seguridad. Rate limiter con ventana deslizante,
+                verificacion de roles (ADMIN, CAJERO, ESTILISTA) y bloqueo
+                persistente cross-instancia en RateLimitBlocks.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
-           ZERO dependencias de Node.js.
-           Usa wix-members-backend para verificacion de roles.
 CORRECTIONS APPLIED:
-  [SEC-06] Rate limiter con ventana deslizante y cleanup periodico.
-  [SEC-07] isKeyPersistentlyBlocked consulta RateLimitBlocks en CMS.
-  [SEC-08] requireAdmin/requireCajero lanzan errores estructurados.
-  [SEC-09] Cache de roles con TTL configurable.
+  [FIX B1] rateLimiter() activa registerPersistentBlock() cuando se excede
+           3x el limite. Bloqueo persistente de 1 hora en RateLimitBlocks.
+  [SEC-01] Rate limiter con ventana deslizante y cleanup periodico.
+  [SEC-02] isKeyPersistentlyBlocked consulta RateLimitBlocks en CMS.
+  [SEC-03] requireAdmin/requireCajero lanzan errores estructurados.
+  [SEC-04] Cache de roles con TTL configurable.
 =============================================================================
 */
 
 import wixData from "wix-data";
 import { currentMember } from "wix-members-backend";
-import { COLLECTIONS, SDK_CONFIG, STAFF, STAFF_ACCESS, COLLAB_ROLES } from "backend/internalConfig";
+
+import {
+  COLLECTIONS,
+  SDK_CONFIG,
+  STAFF,
+  STAFF_ACCESS,
+  COLLAB_ROLES,
+} from "backend/internalConfig";
+
 import { makeTraceId } from "public/mmUtils";
 import { logger } from "backend/logger";
 
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 — RATE LIMITER (VENTANA DESLIZANTE EN MEMORIA)
+// BLOQUE 1 — RATE LIMITER (VENTANA DESLIZANTE + BLOQUEO PERSISTENTE)
+// [FIX B1] Activar registerPersistentBlock cuando se exceda 3x el limite
 // =============================================================================
 
-const rateLimitCache = new Map(); // key -> { timestamps: [], blockedUntil }
+const rateLimitCache = new Map();
 const RATE_LIMIT_MAX_REQUESTS = SDK_CONFIG?.RATE_LIMIT?.MAX_REQUESTS || 20;
 const RATE_LIMIT_WINDOW_MS = SDK_CONFIG?.RATE_LIMIT?.WINDOW_MS || 5000;
 const RATE_LIMIT_CLEANUP_TTL_MS = SDK_CONFIG?.SECURITY?.RATE_LIMIT_CACHE_CLEANUP_TTL_MS || 60000;
 const RATE_LIMIT_CACHE_MAX_ENTRIES = SDK_CONFIG?.SECURITY?.RATE_LIMIT_CACHE_MAX_ENTRIES || 5000;
 
+// [FIX B1] Umbrales para bloqueo persistente
+const PERSISTENT_BLOCK_THRESHOLD_MULTIPLIER = 3;
+const PERSISTENT_BLOCK_DURATION_MS = 3600000; // 1 hora
+
 let lastCleanupTime = Date.now();
 
-/**
- * Limpia entradas expiradas del cache de rate limiting.
- */
 function _cleanupRateLimitCache() {
   const now = Date.now();
   if (now - lastCleanupTime < RATE_LIMIT_CLEANUP_TTL_MS) return;
@@ -57,7 +65,6 @@ function _cleanupRateLimitCache() {
     }
   }
 
-  // Limitar tamaño del cache
   if (rateLimitCache.size > RATE_LIMIT_CACHE_MAX_ENTRIES) {
     const keysToDelete = rateLimitCache.size - RATE_LIMIT_CACHE_MAX_ENTRIES;
     let deleted = 0;
@@ -70,13 +77,13 @@ function _cleanupRateLimitCache() {
 }
 
 /**
- * Rate limiter con ventana deslizante.
- * @param {Object} options - Opciones del rate limiter
- * @param {string} options.surface - Superficie (endpoint)
- * @param {string} options.key - Clave del solicitante
- * @param {number} maxRequests - Maximo de requests permitidos (opcional)
- * @param {number} windowMs - Ventana en milisegundos (opcional)
- * @returns {Object} { allowed: boolean, retryAfter: number }
+ * Rate limiter con ventana deslizante + bloqueo persistente cross-instancia.
+ * [FIX B1] Cuando se excede 3x el limite, se registra bloqueo persistente de 1h.
+ *
+ * @param {Object} options - { surface, key }
+ * @param {number} maxRequests - Limite por ventana (opcional)
+ * @param {number} windowMs - Ventana en ms (opcional)
+ * @returns {Object} { allowed: boolean, retryAfter: number, persistentBlock: boolean }
  */
 export function rateLimiter({ surface, key }, maxRequests, windowMs) {
   _cleanupRateLimitCache();
@@ -88,44 +95,62 @@ export function rateLimiter({ surface, key }, maxRequests, windowMs) {
 
   let entry = rateLimitCache.get(cacheKey);
   if (!entry) {
-    entry = { timestamps: [], blockedUntil: null };
+    entry = { timestamps: [], blockedUntil: null, persistentBlockTriggered: false };
     rateLimitCache.set(cacheKey, entry);
   }
 
-  // Verificar bloqueo persistente
+  // Verificar bloqueo persistente en memoria
   if (entry.blockedUntil && entry.blockedUntil > now) {
     const retryAfter = Math.ceil((entry.blockedUntil - now) / 1000);
-    return { allowed: false, retryAfter };
+    return { allowed: false, retryAfter, persistentBlock: true };
   }
 
   // Filtrar timestamps fuera de la ventana
   const windowStart = now - window;
   entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart);
 
+  // [FIX B1] Umbral de bloqueo persistente: 3x el limite
+  const persistentThreshold = max * PERSISTENT_BLOCK_THRESHOLD_MULTIPLIER;
+
   if (entry.timestamps.length >= max) {
+    // [FIX B1] Si supera el umbral persistente, registrar bloqueo
+    if (entry.timestamps.length >= persistentThreshold && !entry.persistentBlockTriggered) {
+      entry.persistentBlockTriggered = true;
+      entry.blockedUntil = now + PERSISTENT_BLOCK_DURATION_MS;
+
+      // Registrar en CMS de forma no bloqueante (fire-and-forget)
+      registerPersistentBlock(surface, key, PERSISTENT_BLOCK_DURATION_MS, makeTraceId("rl-block"))
+        .catch((err) => log.error("registerPersistentBlock failed", { error: err?.message }));
+
+      log.warn("Persistent block triggered", {
+        surface,
+        key,
+        requestsInWindow: entry.timestamps.length,
+        threshold: persistentThreshold,
+        durationMs: PERSISTENT_BLOCK_DURATION_MS,
+      });
+
+      const retryAfter = Math.ceil(PERSISTENT_BLOCK_DURATION_MS / 1000);
+      return { allowed: false, retryAfter, persistentBlock: true };
+    }
+
+    // Bloqueo normal de ventana
     const oldestInWindow = entry.timestamps[0] || now;
     const retryAfterMs = oldestInWindow + window - now;
     const retryAfter = Math.max(1, Math.ceil(retryAfterMs / 1000));
-    return { allowed: false, retryAfter };
+    return { allowed: false, retryAfter, persistentBlock: false };
   }
 
   entry.timestamps.push(now);
-  return { allowed: true, retryAfter: 0 };
+  return { allowed: true, retryAfter: 0, persistentBlock: false };
 }
-
-// =============================================================================
-// BLOQUE 2 — BLOQUEO PERSISTENTE CROSS-INSTANCIA
-// =============================================================================
 
 /**
  * Verifica si una clave esta bloqueada persistentemente en el CMS.
- * @param {string} surface - Superficie (endpoint)
- * @param {string} key - Clave del solicitante
- * @returns {Promise<boolean>} true si esta bloqueada
+ * Se llama al inicio de cada webMethod critico para detectar abusos cross-instancia.
  */
 export async function isKeyPersistentlyBlocked(surface, key) {
   try {
-    const blockKey = `${surface}:${key}`;
     const res = await wixData
       .query(COLLECTIONS.RATE_LIMIT_BLOCKS)
       .eq("surface", surface)
@@ -143,17 +168,17 @@ export async function isKeyPersistentlyBlocked(surface, key) {
 
 /**
  * Registra un bloqueo persistente en el CMS.
- * @param {string} surface - Superficie (endpoint)
- * @param {string} key - Clave del solicitante
- * @param {number} durationMs - Duracion del bloqueo en ms
- * @param {string} traceId - TraceId para auditoria
+ * Cross-instancia: sobrevive cold starts de serverless.
  */
 export async function registerPersistentBlock(surface, key, durationMs, traceId) {
   try {
     const expiresAt = new Date(Date.now() + durationMs);
+    const blockId = `RL_${_safeTrim(surface).slice(0, 20)}_${_safeTrim(key).slice(0, 20)}_${Date.now()}`;
+
     await wixData.insert(
       COLLECTIONS.RATE_LIMIT_BLOCKS,
       {
+        _id: blockId,
         surface,
         key,
         expiresAt,
@@ -168,50 +193,38 @@ export async function registerPersistentBlock(surface, key, durationMs, traceId)
 }
 
 // =============================================================================
-// BLOQUE 3 — VERIFICACION DE ROLES
+// BLOQUE 2 — VERIFICACION DE ROLES
 // =============================================================================
 
-// Cache de roles con TTL
-const roleCache = new Map(); // memberId -> { role, timestamp }
+const roleCache = new Map();
 const ROLE_CACHE_TTL_MS = SDK_CONFIG?.CACHE?.STAFF_TTL_MS || 300000;
 
-/**
- * Obtiene el miembro actual y su email.
- * @returns {Promise<Object|null>} { memberId, email } o null
- */
 async function _getCurrentMemberInfo() {
   try {
     const member = await currentMember.getMember();
     if (!member) return null;
     return {
       memberId: member._id,
-      email: member.loginEmail || member.contactDetails?.email || "",
+      email: (member.loginEmail || member.contactDetails?.email || "").toLowerCase(),
     };
-  } catch (err) {
+  } catch (_) {
     return null;
   }
 }
 
-/**
- * Verifica si el miembro actual tiene rol ADMIN.
- * @param {string} traceId - TraceId para auditoria
- * @returns {Promise<boolean>} true si es ADMIN
- */
 export async function isAdmin(traceId) {
   const memberInfo = await _getCurrentMemberInfo();
   if (!memberInfo) return false;
 
-  // Verificar cache
   const cached = roleCache.get(memberInfo.memberId);
   if (cached && Date.now() - cached.timestamp < ROLE_CACHE_TTL_MS) {
     return cached.role === COLLAB_ROLES.ADMIN;
   }
 
-  // Consultar MapaStaff
   try {
     const res = await wixData
       .query(COLLECTIONS.MAPA_STAFF)
-      .eq("email", memberInfo.email.toLowerCase())
+      .eq("email", memberInfo.email)
       .eq("active", true)
       .limit(1)
       .find({ suppressAuth: true });
@@ -219,7 +232,6 @@ export async function isAdmin(traceId) {
     const staffRecord = res?.items?.[0];
     const role = staffRecord?.rol || null;
 
-    // Actualizar cache
     roleCache.set(memberInfo.memberId, { role, timestamp: Date.now() });
 
     return role === COLLAB_ROLES.ADMIN;
@@ -229,11 +241,6 @@ export async function isAdmin(traceId) {
   }
 }
 
-/**
- * Verifica si el miembro actual tiene rol CAJERO (ADMIN o GESTION).
- * @param {string} traceId - TraceId para auditoria
- * @returns {Promise<boolean>} true si es CAJERO
- */
 export async function isCajero(traceId) {
   const memberInfo = await _getCurrentMemberInfo();
   if (!memberInfo) return false;
@@ -246,7 +253,7 @@ export async function isCajero(traceId) {
   try {
     const res = await wixData
       .query(COLLECTIONS.MAPA_STAFF)
-      .eq("email", memberInfo.email.toLowerCase())
+      .eq("email", memberInfo.email)
       .eq("active", true)
       .limit(1)
       .find({ suppressAuth: true });
@@ -263,11 +270,6 @@ export async function isCajero(traceId) {
   }
 }
 
-/**
- * Verifica si el miembro actual es colaborador de staff (cualquier rol activo).
- * @param {string} traceId - TraceId para auditoria
- * @returns {Promise<boolean>} true si es staff colaborador
- */
 export async function isStaffCollaborator(traceId) {
   const memberInfo = await _getCurrentMemberInfo();
   if (!memberInfo) return false;
@@ -280,7 +282,7 @@ export async function isStaffCollaborator(traceId) {
   try {
     const res = await wixData
       .query(COLLECTIONS.MAPA_STAFF)
-      .eq("email", memberInfo.email.toLowerCase())
+      .eq("email", memberInfo.email)
       .eq("active", true)
       .limit(1)
       .find({ suppressAuth: true });
@@ -298,14 +300,9 @@ export async function isStaffCollaborator(traceId) {
 }
 
 // =============================================================================
-// BLOQUE 4 — FUNCIONES REQUIRE (LANZAN ERROR SI NO AUTORIZADO)
+// BLOQUE 3 — FUNCIONES REQUIRE (LANZAN ERROR SI NO AUTORIZADO)
 // =============================================================================
 
-/**
- * Exige rol ADMIN. Lanza error si no autorizado.
- * @param {string} traceId - TraceId para auditoria
- * @throws {Error} Si no es ADMIN
- */
 export async function requireAdmin(traceId) {
   const authorized = await isAdmin(traceId);
   if (!authorized) {
@@ -316,11 +313,6 @@ export async function requireAdmin(traceId) {
   }
 }
 
-/**
- * Exige rol CAJERO (ADMIN o GESTION). Lanza error si no autorizado.
- * @param {string} traceId - TraceId para auditoria
- * @throws {Error} Si no es CAJERO
- */
 export async function requireCajero(traceId) {
   const authorized = await isCajero(traceId);
   if (!authorized) {
@@ -331,11 +323,6 @@ export async function requireCajero(traceId) {
   }
 }
 
-/**
- * Exige rol de Marian Manager (ADMIN con resourceId especifico).
- * @param {string} traceId - TraceId para auditoria
- * @throws {Error} Si no es Marian Manager
- */
 export async function requireMarianManager(traceId) {
   const memberInfo = await _getCurrentMemberInfo();
   if (!memberInfo) {
@@ -355,21 +342,13 @@ export async function requireMarianManager(traceId) {
 }
 
 // =============================================================================
-// BLOQUE 5 — UTILIDADES DE SEGURIDAD
+// BLOQUE 4 — UTILIDADES
 // =============================================================================
 
-/**
- * Limpia el cache de roles (util para testing o invalidacion manual).
- */
 export function clearRoleCache() {
   roleCache.clear();
 }
 
-/**
- * Obtiene el resourceId del miembro actual si es staff activo.
- * @param {string} traceId - TraceId para auditoria
- * @returns {Promise<string|null>} resourceId o null
- */
 export async function getCurrentStaffResourceId(traceId) {
   const memberInfo = await _getCurrentMemberInfo();
   if (!memberInfo) return null;
@@ -377,7 +356,7 @@ export async function getCurrentStaffResourceId(traceId) {
   try {
     const res = await wixData
       .query(COLLECTIONS.MAPA_STAFF)
-      .eq("email", memberInfo.email.toLowerCase())
+      .eq("email", memberInfo.email)
       .eq("active", true)
       .limit(1)
       .find({ suppressAuth: true });
@@ -388,4 +367,12 @@ export async function getCurrentStaffResourceId(traceId) {
     log.error("getCurrentStaffResourceId failed", { error: err?.message, traceId });
     return null;
   }
+}
+
+function _safeTrim(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v !== "string") {
+    try { return String(v).trim(); } catch (_) { return ""; }
+  }
+  return v.trim();
 }
