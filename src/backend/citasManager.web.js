@@ -60,8 +60,8 @@ function _getNativeAddonIdsForRevalidation(cita) {
     const bookedAddOns = Array.isArray(cita?.meta?.nativeBookedAddOns) ? cita.meta.nativeBookedAddOns : [];
     return Array.from(new Set(
         bookedAddOns
-        .map((addon) => _safeTrim(addon?._id || addon))
-        .filter((addonId) => _looksLikeGuid(addonId))
+            .map((addon) => _safeTrim(addon?._id || addon))
+            .filter((addonId) => _looksLikeGuid(addonId))
     )).sort();
 }
 
@@ -135,7 +135,8 @@ export const processDualBooking = webMethod(Permissions.Anyone, async (unsafePay
         const requestedStart = _safeTrim(slotF1.localStartDate || slotF1.startDate || "");
         const requestedResourceId = _safeTrim(slotF1.resourceId || slotF1.resource?.id || "");
         const rateKey = `${serviceId}:${requestedStart || "no-start"}:${requestedResourceId || "any-resource"}`;
-        const rate = rateLimiter({ surface: "public-booking", key: rateKey },
+        const rate = rateLimiter(
+            { surface: "public-booking", key: rateKey },
             Number(SDK_CONFIG?.RATE_LIMIT?.BOOKING_MAX_REQUESTS),
             Number(SDK_CONFIG?.RATE_LIMIT?.BOOKING_WINDOW_MS)
         );
@@ -217,8 +218,7 @@ async function _setCitasPaymentState(citas, paymentState, orderId, traceId) {
             const meta = item.meta || {};
             return {
                 ...item,
-                ...(paymentState === ESTADO_PAGO.PAID ? {
-                    [CITA_FIELDS.STATUS]: ESTADO_CITA.CONFIRMED } : {}),
+                ...(paymentState === ESTADO_PAGO.PAID ? { [CITA_FIELDS.STATUS]: ESTADO_CITA.CONFIRMED } : {}),
                 [CITA_FIELDS.STATUS_PAGO]: paymentState,
                 meta: {
                     ...meta,
@@ -236,9 +236,9 @@ export const confirmPayment = webMethod(Permissions.Admin, async (payload = {}) 
     try {
         await requireAdmin(traceId);
         const bookingIds = Array.from(new Set(
-            Array.isArray(payload.bookingIds) ?
-            payload.bookingIds.map((id) => _safeTrim(id)).filter(Boolean) :
-            [_safeTrim(payload.bookingIdF1), _safeTrim(payload.bookingIdF2)].filter(Boolean)
+            Array.isArray(payload.bookingIds)
+                ? payload.bookingIds.map((id) => _safeTrim(id)).filter(Boolean)
+                : [_safeTrim(payload.bookingIdF1), _safeTrim(payload.bookingIdF2)].filter(Boolean)
         ));
         if (!bookingIds.length) {
             return { status: "ERROR", data: null, error: { code: "INVALID_PAYLOAD", message: "No booking IDs provided" } };
@@ -293,7 +293,8 @@ export const confirmPayment = webMethod(Permissions.Admin, async (payload = {}) 
             await _logAuditEvent(
                 "LEDGER_REGISTRATION_FAILED",
                 "ERROR",
-                `Ledger registration queued for order ${orderId}`, { orderId, bookingIds, ledgerError: ledgerRes?.error || "Unknown ledger error", traceId },
+                `Ledger registration queued for order ${orderId}`,
+                { orderId, bookingIds, ledgerError: ledgerRes?.error || "Unknown ledger error", traceId },
                 traceId
             );
             return {
