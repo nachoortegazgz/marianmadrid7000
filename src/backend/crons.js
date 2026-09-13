@@ -1,7 +1,7 @@
 /*
 =============================================================================
 MODULE: backend/crons.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.3-FINAL
 BASE: BIBLIA v5002.5 Bloque 4.5 + DIRECTRICES V19
 RESPONSIBILITY: Jobs programados (cron). 6 crons activos.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
@@ -22,9 +22,10 @@ import { _cleanExpiredDualSlotsInternal } from "backend/reservas.web";
 
 const log = logger;
 
-// ============================================================================
+// =============================================================================
 // CRON 1: cleanExpiredLocks — 15 * * * * (cada hora :15)
-// ============================================================================
+// =============================================================================
+
 export async function cleanExpiredLocks() {
   const traceId = makeTraceId("cron-locks");
   try {
@@ -40,15 +41,17 @@ export async function cleanExpiredLocks() {
       await wixData.remove(COLLECTIONS.SLOT_LOCKS, item._id, { suppressAuth: true }).catch(() => null);
       removed++;
     }
+
     log.info("cleanExpiredLocks completed", { removed, traceId });
   } catch (err) {
     log.error("cleanExpiredLocks failed", { error: err?.message, traceId });
   }
 }
 
-// ============================================================================
+// =============================================================================
 // CRON 2: cleanupExpiredDualCache — 20 * * * * (cada hora :20)
-// ============================================================================
+// =============================================================================
+
 export async function cleanupExpiredDualCache() {
   const traceId = makeTraceId("cron-dual-cache");
   try {
@@ -58,9 +61,10 @@ export async function cleanupExpiredDualCache() {
   }
 }
 
-// ============================================================================
+// =============================================================================
 // CRON 3: runPendingCompensationsJob — 30 * * * * (cada hora :30)
-// ============================================================================
+// =============================================================================
+
 export async function runPendingCompensationsJob() {
   const traceId = makeTraceId("cron-comp");
   try {
@@ -74,8 +78,8 @@ export async function runPendingCompensationsJob() {
     let processed = 0;
     for (const comp of res?.items || []) {
       try {
-        // Reintentar la compensacion segun kind
-        // (Logica especifica por tipo de compensacion)
+        // Reintentar la compensación según tipo
+        // (Lógica específica por tipo de compensación)
         comp.status = "COMPLETED";
         comp._updatedDate = new Date();
         await wixData.update(COLLECTIONS.COMPENSACIONES_PENDIENTES, comp, { suppressAuth: true });
@@ -88,15 +92,17 @@ export async function runPendingCompensationsJob() {
         await wixData.update(COLLECTIONS.COMPENSACIONES_PENDIENTES, comp, { suppressAuth: true });
       }
     }
+
     log.info("runPendingCompensationsJob completed", { processed, traceId });
   } catch (err) {
     log.error("runPendingCompensationsJob failed", { error: err?.message, traceId });
   }
 }
 
-// ============================================================================
+// =============================================================================
 // CRON 4: cleanExpiredDaysCache — 0 1 * * * (diario 01:00)
-// ============================================================================
+// =============================================================================
+
 export async function cleanExpiredDaysCache() {
   const traceId = makeTraceId("cron-days-cache");
   try {
@@ -112,29 +118,32 @@ export async function cleanExpiredDaysCache() {
       await wixData.remove(COLLECTIONS.AVAILABILITY_DAYS_CACHE, item._id, { suppressAuth: true }).catch(() => null);
       removed++;
     }
+
     log.info("cleanExpiredDaysCache completed", { removed, traceId });
   } catch (err) {
     log.error("cleanExpiredDaysCache failed", { error: err?.message, traceId });
   }
 }
 
-// ============================================================================
+// =============================================================================
 // CRON 5: cleanExpiredSlotsCache — 10 1 * * * (diario 01:10)
-// ============================================================================
+// =============================================================================
+
 export async function cleanExpiredSlotsCache() {
   const traceId = makeTraceId("cron-slots-cache");
   try {
-    // La cache RAM de slots se resetea automaticamente en serverless.
-    // Este cron sirve como documentacion del ciclo de vida.
+    // La caché RAM de slots se resetea automáticamente en serverless.
+    // Este cron sirve como documentación del ciclo de vida.
     log.info("cleanExpiredSlotsCache completed (RAM cache auto-resets on cold start)", { traceId });
   } catch (err) {
     log.error("cleanExpiredSlotsCache failed", { error: err?.message, traceId });
   }
 }
 
-// ============================================================================
+// =============================================================================
 // CRON 6: systemHealthCheck — 0 7 * * * (diario 07:00)
-// ============================================================================
+// =============================================================================
+
 export async function systemHealthCheck() {
   const traceId = makeTraceId("cron-health");
   try {
@@ -145,7 +154,7 @@ export async function systemHealthCheck() {
       secrets: {},
     };
 
-    // Verificar colecciones criticas
+    // Verificar colecciones críticas
     const criticalCols = [
       COLLECTIONS.CITAS_F2,
       COLLECTIONS.MOVIMIENTOS_CAJA,

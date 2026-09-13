@@ -1,12 +1,12 @@
 /*
 =============================================================================
 MODULE: backend/http-functions.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.3-FINAL
 BASE: BIBLIA v5002.5 Bloque 12.13 + DIRECTRICES V19
-RESPONSIBILITY: Endpoints HTTP expuestos. Webhook M365 con validacion HMAC.
+RESPONSIBILITY: Endpoints HTTP expuestos. Webhook M365 con validación HMAC.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 CORRECTIONS APPLIED:
-  [HTTP-01] Validacion HMAC con timingSafeEqual.
+  [HTTP-01] Validación HMAC con timingSafeEqual.
   [HTTP-02] Respuesta JSON uniforme.
   [HTTP-03] Rate limiting en el borde.
 =============================================================================
@@ -21,6 +21,10 @@ import { timingSafeEqual } from "backend/securityEngine";
 import { rateLimiter } from "backend/security";
 
 const log = logger;
+
+// =============================================================================
+// BLOQUE 1 — VALIDACIÓN HMAC
+// =============================================================================
 
 async function _validateHMACSignature(request, bodyString, traceId) {
   try {
@@ -47,6 +51,10 @@ async function _validateHMACSignature(request, bodyString, traceId) {
   }
 }
 
+// =============================================================================
+// BLOQUE 2 — WEBHOOK M365
+// =============================================================================
+
 export async function post_webhook_m365(request) {
   const traceId = makeTraceId("m365-wh");
   try {
@@ -72,8 +80,8 @@ export async function post_webhook_m365(request) {
 
     log.info("M365 webhook received", { traceId, eventType: payload?.eventType });
 
-    // Procesar payload segun eventType
-    // (Logica especifica segun integracion M365)
+    // Procesar payload según eventType
+    // (Lógica específica según integración M365)
 
     return ok({ body: { status: "RECEIVED", traceId } });
   } catch (err) {

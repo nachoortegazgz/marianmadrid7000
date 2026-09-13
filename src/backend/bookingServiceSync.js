@@ -1,15 +1,15 @@
 /*
 =============================================================================
 MODULE: backend/bookingServiceSync.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.3-FINAL
 BASE: BIBLIA v5002.5 Bloque 12.12 + DIRECTRICES V19
-RESPONSIBILITY: Cola de sincronizacion entre ServiciosCatalogo (CMS) y
+RESPONSIBILITY: Cola de sincronización entre ServiciosCatalogo (CMS) y
                 Wix Bookings V2 nativo. Encola cambios y los procesa con
                 backoff y reintentos.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 CORRECTIONS APPLIED:
-  [SYNC-01] Usa COLLECTIONS.BOOKINGS_SERVICE_SYNC_QUEUE (coleccion propia).
-  [SYNC-02] Proyeccion deseada con campos canonicos v19.6.
+  [SYNC-01] Usa COLLECTIONS.BOOKINGS_SERVICE_SYNC_QUEUE (colección propia).
+  [SYNC-02] Proyección deseada con campos canónicos v19.6.
   [SYNC-03] Backoff exponencial con max 5 intentos.
 =============================================================================
 */
@@ -28,10 +28,14 @@ const MAX_ATTEMPTS = Number(SDK_CONFIG?.JOBS?.BOOKINGS_SERVICE_SYNC_MAX_ATTEMPTS
 const BATCH_SIZE = Number(SDK_CONFIG?.JOBS?.BOOKINGS_SERVICE_SYNC_BATCH_SIZE) || 20;
 const BACKOFF_MS = Number(SDK_CONFIG?.JOBS?.BOOKINGS_SERVICE_SYNC_BACKOFF_MS) || 300000;
 
+// =============================================================================
+// BLOQUE 1 — HELPERS DE VALIDACIÓN
+// =============================================================================
+
 function _cleanGuid(value, errorCode) {
   const clean = _safeTrim(value);
   if (!clean || !_looksLikeGuid(clean)) {
-    throw new Error(`${errorCode}: GUID invalido o ausente`);
+    throw new Error(`${errorCode}: GUID inválido o ausente`);
   }
   return clean;
 }
@@ -40,6 +44,10 @@ function _cleanGuidList(value) {
   if (!Array.isArray(value)) return [];
   return value.filter((id) => _looksLikeGuid(_safeTrim(id))).map(_safeTrim);
 }
+
+// =============================================================================
+// BLOQUE 2 — PROYECCIÓN DESEADA
+// =============================================================================
 
 function _buildDesiredProjection(item) {
   return {
@@ -63,6 +71,10 @@ function _buildDesiredProjection(item) {
     allowCombine: item.allowCombine === true || item.permitirCombinar === true,
   };
 }
+
+// =============================================================================
+// BLOQUE 3 — ENCOLAR SYNC DE SERVICIO
+// =============================================================================
 
 export async function enqueueBookingsServiceSync(serviceItem) {
   const traceId = makeTraceId("svc-sync");
@@ -94,6 +106,10 @@ export async function enqueueBookingsServiceSync(serviceItem) {
   }
 }
 
+// =============================================================================
+// BLOQUE 4 — PROCESAR COLA DE SYNC
+// =============================================================================
+
 export async function processBookingsServiceSyncQueue(options = {}) {
   const traceId = options?.traceId || makeTraceId("svc-sync-proc");
   const batchSize = Math.min(Number(options?.batchSize) || BATCH_SIZE, 100);
@@ -119,8 +135,8 @@ export async function processBookingsServiceSyncQueue(options = {}) {
         item._updatedDate = new Date();
         await wixData.update(QUEUE_COL, item, { suppressAuth: true });
 
-        // Aqui se ejecutaria la llamada real a Wix Bookings V2 services API
-        // Para actualizar el servicio nativo con la proyeccion deseada.
+        // Aquí se ejecutaría la llamada real a Wix Bookings V2 services API
+        // Para actualizar el servicio nativo con la proyección deseada.
         // Ejemplo: await bookingsServices.updateService(item.serviceId, item.desiredPayload);
 
         item.status = "COMPLETED";

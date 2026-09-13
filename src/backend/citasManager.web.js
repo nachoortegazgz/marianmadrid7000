@@ -1,26 +1,21 @@
 /*
 =============================================================================
 MODULE: backend/citasManager.web.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.4-FINAL (CORREGIDO)
 BASE: BIBLIA v5002.5 Bloque 12.4 + MOTOR DE RESERVAS + DIRECTRICES V19
-RESPONSIBILITY: Web methods para procesamiento de reservas duales,
-                confirmacion de pagos y reprogramaciones. Capa intermedia
-                entre frontend y la Saga.
-STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
-           ZERO legacy (serviceId, linkedPhases, resourceId).
 CORRECTIONS APPLIED:
   [CM-01] Nomenclatura v19.6: serviceId, linkedPhases, resourceId.
   [CM-02] Idempotencia por pairToken en processDualBooking.
-  [CM-03] Validacion de orden pagada antes de confirmar pago.
+  [CM-03] Validación de orden pagada antes de confirmar pago.
   [CM-04] _assertBookingOwner verifica propiedad de la cita.
-  [CM-05] Reprogramacion dual con revalidacion de slots.
+  [CM-05] Reprogramación dual con revalidación de slots.
+  [CM-06] _buildDualRescheduleSlot usa linkedPhases (no secondaryServiceGuid).
 =============================================================================
 */
 
 import { webMethod, Permissions } from "wix-web-module";
 import wixData from "wix-data";
 import { orders } from "wix-ecom-backend";
-
 import { logger } from "backend/logger";
 import {
   COLLECTIONS,
@@ -31,7 +26,6 @@ import {
   ESTADO_PAGO,
   FORMA_PAGO,
 } from "backend/internalConfig";
-
 import {
   makeTraceId,
   _safeTrim,
@@ -41,7 +35,6 @@ import {
   _readPositiveAmount,
   withTimeout,
 } from "public/mmUtils";
-
 import { executeBookingSaga } from "backend/booking/bookingSaga";
 import {
   _updateCitaSafe,
@@ -62,9 +55,9 @@ const log = logger;
 const CITAS_COL = COLLECTIONS.CITAS_F2;
 const API_TIMEOUT_MS = Number(SDK_CONFIG?.TIMEOUTS?.API_MS) || 15000;
 
-// =============================================================================
-// BLOQUE 1 — HELPERS INTERNOS
-// =============================================================================
+// ============================================================================
+// HELPERS INTERNOS
+// ============================================================================
 
 function _getCitaMeta(cita) {
   if (!cita) return {};
@@ -84,11 +77,13 @@ function _getNativeAddonIdsForRevalidation(cita) {
 async function _findCitaByBookingId(bookingId) {
   const bid = _safeTrim(bookingId);
   if (!bid) return null;
+
   const res = await wixData
     .query(CITAS_COL)
     .eq("bookingId", bid)
     .limit(1)
     .find({ suppressAuth: true });
+
   return res?.items?.[0] || null;
 }
 
@@ -120,10 +115,10 @@ function _rateLimitOrThrow(surface, key, traceId) {
   }
 }
 
-// =============================================================================
-// BLOQUE 2 — PROCESS DUAL BOOKING (WEBMETHOD PRINCIPAL)
+// ============================================================================
+// WEBMETHOD: PROCESS DUAL BOOKING
 // [CM-02] Idempotencia por pairToken
-// =============================================================================
+// ============================================================================
 
 export const processDualBooking = webMethod(Permissions.Anyone, async (unsafePayload) => {
   const traceId = unsafePayload?.traceId || makeTraceId("dual-bkg");
@@ -136,10 +131,10 @@ export const processDualBooking = webMethod(Permissions.Anyone, async (unsafePay
   }
 });
 
-// =============================================================================
-// BLOQUE 3 — CONFIRMACION DE PAGO
-// [CM-03] Validacion de orden pagada antes de confirmar
-// =============================================================================
+// ============================================================================
+// CONFIRMACIÓN DE PAGO
+// [CM-03] Validación de orden pagada antes de confirmar
+// ============================================================================
 
 function _isPaidOrderStatus(value) {
   const s = String(value || "").toUpperCase();
@@ -292,9 +287,9 @@ export const confirmPayment = webMethod(Permissions.Anyone, async (payload) => {
   }
 });
 
-// =============================================================================
-// BLOQUE 4 — REPROGRAMACION DE RESERVA SIMPLE
-// =============================================================================
+// ============================================================================
+// REPROGRAMACIÓN DE RESERVA SIMPLE
+// ============================================================================
 
 export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bookingId, newSlot, revision) => {
   const traceId = makeTraceId("resched");
@@ -306,17 +301,14 @@ export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bo
       return { status: "ERROR", data: null, error: { code: "CITA_NOT_FOUND", message: "Cita not found" } };
     }
 
-    // [CM-04] Verificar propietario
     await _assertBookingOwner(cita, traceId);
 
-    // Verificar revision
     const currentRevision = Number(cita.revision || 0);
     const requestedRevision = Number(revision || 0);
     if (requestedRevision > 0 && requestedRevision !== currentRevision) {
       return { status: "ERROR", data: null, error: { code: "REVISION_MISMATCH", message: "Revision mismatch" } };
     }
 
-    // Revalidar slot en tiempo real
     const serviceId = _safeTrim(cita.serviceId || _getCitaMeta(cita).serviceId);
     const revalidation = await revalidateExactAvailabilitySlot({
       serviceId,
@@ -330,7 +322,6 @@ export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bo
       return { status: "ERROR", data: null, error: { code: "SLOT_UNAVAILABLE", message: "New slot is not available" } };
     }
 
-    // Reprogramar en Wix Bookings V2
     const schedule = {
       startDate: newSlot?.localStartDate || newSlot?.start,
       endDate: newSlot?.localEndDate || newSlot?.end,
@@ -339,7 +330,6 @@ export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bo
 
     await rescheduleBookingElevated(bookingId, schedule, {});
 
-    // Actualizar cita en CMS
     await _updateCitaSafe(bookingId, (c) => ({
       ...c,
       startDate: new Date(newSlot?.localStartDate || newSlot?.start),
@@ -361,9 +351,11 @@ export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bo
   }
 });
 
-// =============================================================================
-// BLOQUE 5 — REPROGRAMACION DUAL
-// =============================================================================
+// ============================================================================
+// REPROGRAMACIÓN DUAL
+// [CM-05] Revalidación de slots
+// [CM-06] _buildDualRescheduleSlot usa linkedPhases
+// ============================================================================
 
 function _getDualSlotInput(payload, key) {
   const slot = payload?.[key];
@@ -381,9 +373,34 @@ function _matchesCitaPairIdentifier(cita, token) {
   return pairToken === token || uiPairToken === token;
 }
 
+function _getBookingSlotFromCita(cita) {
+  return {
+    serviceId: cita.serviceId,
+    resourceId: cita.resourceId,
+    startDate: cita.startDate,
+    endDate: cita.endDate,
+    startDateLocal: cita.startDateLocal,
+    endDateLocal: cita.endDateLocal,
+  };
+}
+
+// [CM-06] Usa linkedPhases (no secondaryServiceGuid)
+async function _buildDualRescheduleSlot(serviceConfig, inputSlot, expectedServiceId) {
+  // [CM-06] Campo canónico: linkedPhases
+  const linkedServiceId = _safeTrim(serviceConfig?.linkedPhases || serviceConfig?.secondaryServiceGuid || "");
+
+  if (!linkedServiceId || linkedServiceId !== expectedServiceId) {
+    return null;
+  }
+
+  return {
+    serviceId: linkedServiceId,
+    localStartDate: inputSlot.localStartDate,
+    localEndDate: inputSlot.localEndDate,
+  };
+}
+
 async function _assertBookingOwner(cita, traceId) {
-  // En produccion, verificar contra el miembro actual
-  // Por ahora, solo verificar que la cita existe
   if (!cita) {
     throw createBookingError(ERROR_CODES.AUTH_REQUIRED, "Cita not found", { traceId });
   }
@@ -399,7 +416,6 @@ export const rescheduleDualBookings = webMethod(Permissions.Anyone, async (paylo
       return { status: "ERROR", data: null, error: { code: "INVALID_PAYLOAD", message: "pairToken required" } };
     }
 
-    // Buscar citas del par
     const res = await wixData
       .query(CITAS_COL)
       .eq("pairToken", pairToken)
@@ -411,7 +427,6 @@ export const rescheduleDualBookings = webMethod(Permissions.Anyone, async (paylo
       return { status: "ERROR", data: null, error: { code: "CITA_NOT_FOUND", message: "No citas found for pairToken" } };
     }
 
-    // Verificar propietario
     for (const cita of citas) {
       await _assertBookingOwner(cita, traceId);
     }
@@ -423,7 +438,6 @@ export const rescheduleDualBookings = webMethod(Permissions.Anyone, async (paylo
       return { status: "ERROR", data: null, error: { code: "INVALID_PAYLOAD", message: "slotF1 dates required" } };
     }
 
-    // Reprogramar cada booking
     for (const cita of citas) {
       const isF2 = String(cita.bookingType || "").includes("f2") || _getCitaMeta(cita).linkedF1BookingId;
       const targetSlot = isF2 ? slotF2Input : slotF1Input;
