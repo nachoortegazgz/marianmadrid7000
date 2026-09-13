@@ -2,7 +2,7 @@
 =============================================================================
 MODULE: backend/mmSecrets.js
 VERSION: v5007.3-FINAL
-BASE: BIBLIA v5002.5 Bloque 8 — 17 secretos completos
+BASE: BIBLIA v5002.5 Bloque 8 - 17 secretos completos
 =============================================================================
 */
 export const SECRETS = Object.freeze({

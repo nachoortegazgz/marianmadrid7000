@@ -2,15 +2,15 @@
 =============================================================================
 MODULE: backend/data.js
 VERSION: v5007.3-FINAL
-BASE: BIBLIA v5002.5 Bloque 11 + ESQUEMA CMS v5002.5 Sección 7 + DOSSIER CAJA Sección 24
-RESPONSIBILITY: Hooks de inmutabilidad y validación para Wix Data.
+BASE: BIBLIA v5002.5 Bloque 11 + ESQUEMA CMS v5002.5 Seccion 7 + DOSSIER CAJA Seccion 24
+RESPONSIBILITY: Hooks de inmutabilidad y validacion para Wix Data.
                 Protege colecciones fiscales, laborales y contables contra
-                modificación o borrado no autorizado.
+                modificacion o borrado no autorizado.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 CORRECTIONS APPLIED:
   [DATA-01] Todos los hooks de inmutabilidad implementados.
-  [DATA-02] Validación de esquema en ServiciosCatalogo.
-  [DATA-03] Validación de unicidad en MapaStaff.
+  [DATA-02] Validacion de esquema en ServiciosCatalogo.
+  [DATA-03] Validacion de unicidad en MapaStaff.
   [DATA-04] Bloqueo condicional en AsientosContables (POSTED/LOCKED).
   [DATA-05] Singleton protegido en CajaActual.
 =============================================================================
@@ -20,11 +20,11 @@ import wixData from "wix-data";
 import { COLLECTIONS } from "backend/internalConfig";
 
 // =============================================================================
-// BLOQUE 1 — INMUTABILIDAD FISCAL (MovimientosCaja)
+// BLOQUE 1 - INMUTABILIDAD FISCAL (MovimientosCaja)
 // =============================================================================
 
 export function MovimientosCaja_beforeUpdate(item, context) {
-  throw new Error("FISCAL_VIOLATION: Modificación de MovimientosCaja prohibida por normativa fiscal");
+  throw new Error("FISCAL_VIOLATION: Modificacion de MovimientosCaja prohibida por normativa fiscal");
 }
 
 export function MovimientosCaja_beforeRemove(item, context) {
@@ -32,11 +32,11 @@ export function MovimientosCaja_beforeRemove(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 2 — INMUTABILIDAD FISCAL (HistoricoCierresZ)
+// BLOQUE 2 - INMUTABILIDAD FISCAL (HistoricoCierresZ)
 // =============================================================================
 
 export function HistoricoCierresZ_beforeUpdate(item, context) {
-  throw new Error("FISCAL_VIOLATION: Modificación de HistoricoCierresZ prohibida por normativa fiscal");
+  throw new Error("FISCAL_VIOLATION: Modificacion de HistoricoCierresZ prohibida por normativa fiscal");
 }
 
 export function HistoricoCierresZ_beforeRemove(item, context) {
@@ -44,11 +44,11 @@ export function HistoricoCierresZ_beforeRemove(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 3 — INMUTABILIDAD SIF (EventosSistemaFacturacion)
+// BLOQUE 3 - INMUTABILIDAD SIF (EventosSistemaFacturacion)
 // =============================================================================
 
 export function EventosSistemaFacturacion_beforeUpdate(item, context) {
-  throw new Error("SIF_VIOLATION: Modificación de EventosSistemaFacturacion prohibida por normativa SIF");
+  throw new Error("SIF_VIOLATION: Modificacion de EventosSistemaFacturacion prohibida por normativa SIF");
 }
 
 export function EventosSistemaFacturacion_beforeRemove(item, context) {
@@ -56,11 +56,11 @@ export function EventosSistemaFacturacion_beforeRemove(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 4 — INMUTABILIDAD LABORAL (RegistrosHorariosStaff)
+// BLOQUE 4 - INMUTABILIDAD LABORAL (RegistrosHorariosStaff)
 // =============================================================================
 
 export function RegistrosHorariosStaff_beforeUpdate(item, context) {
-  throw new Error("LABOR_LOG_VIOLATION: Modificación de RegistrosHorariosStaff prohibida por Art. 34.9 ET");
+  throw new Error("LABOR_LOG_VIOLATION: Modificacion de RegistrosHorariosStaff prohibida por Art. 34.9 ET");
 }
 
 export function RegistrosHorariosStaff_beforeRemove(item, context) {
@@ -68,7 +68,7 @@ export function RegistrosHorariosStaff_beforeRemove(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 5 — SINGLETON PROTEGIDO (CajaActual)
+// BLOQUE 5 - SINGLETON PROTEGIDO (CajaActual)
 // =============================================================================
 
 export function CajaActual_beforeRemove(item, context) {
@@ -76,7 +76,7 @@ export function CajaActual_beforeRemove(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 6 — VALIDACIÓN DE ESQUEMA (ServiciosCatalogo)
+// BLOQUE 6 - VALIDACION DE ESQUEMA (ServiciosCatalogo)
 // [DATA-02]
 // =============================================================================
 
@@ -97,7 +97,7 @@ function _validateServiciosCatalogoSchema(item) {
   }
   // Validar que serviceId es GUID si existe
   if (item.serviceId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.serviceId)) {
-    throw new Error("SCHEMA_VIOLATION: serviceId debe ser un GUID válido");
+    throw new Error("SCHEMA_VIOLATION: serviceId debe ser un GUID valido");
   }
   // Validar duraciones positivas
   const p1 = Number(item.phase1Duration) || 0;
@@ -117,7 +117,7 @@ function _validateServiciosCatalogoSchema(item) {
 }
 
 // =============================================================================
-// BLOQUE 7 — VALIDACIÓN DE UNICIDAD (MapaStaff)
+// BLOQUE 7 - VALIDACION DE UNICIDAD (MapaStaff)
 // [DATA-03]
 // =============================================================================
 
@@ -156,7 +156,7 @@ async function _validateMapaStaffUniqueness(item) {
 }
 
 // =============================================================================
-// BLOQUE 8 — BLOQUEO CONDICIONAL (AsientosContables)
+// BLOQUE 8 - BLOQUEO CONDICIONAL (AsientosContables)
 // [DATA-04]
 // =============================================================================
 
@@ -175,7 +175,7 @@ export function AsientosContables_beforeRemove(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 9 — BLOQUEO CONDICIONAL (LineasAsientoContable)
+// BLOQUE 9 - BLOQUEO CONDICIONAL (LineasAsientoContable)
 // =============================================================================
 
 export async function LineasAsientoContable_beforeUpdate(item, context) {
@@ -184,7 +184,7 @@ export async function LineasAsientoContable_beforeUpdate(item, context) {
       .get(COLLECTIONS.ASIENTOS_CONTABLES, item.journalEntryId, { suppressAuth: true })
       .catch(() => null);
     if (parentEntry && (parentEntry.entryStatus === "POSTED" || parentEntry.entryStatus === "LOCKED")) {
-      throw new Error("FISCAL_VIOLATION: No se puede modificar línea de asiento POSTED o LOCKED");
+      throw new Error("FISCAL_VIOLATION: No se puede modificar linea de asiento POSTED o LOCKED");
     }
   }
   return item;
@@ -196,14 +196,14 @@ export async function LineasAsientoContable_beforeRemove(item, context) {
       .get(COLLECTIONS.ASIENTOS_CONTABLES, item.journalEntryId, { suppressAuth: true })
       .catch(() => null);
     if (parentEntry && (parentEntry.entryStatus === "POSTED" || parentEntry.entryStatus === "LOCKED")) {
-      throw new Error("FISCAL_VIOLATION: No se puede eliminar línea de asiento POSTED o LOCKED");
+      throw new Error("FISCAL_VIOLATION: No se puede eliminar linea de asiento POSTED o LOCKED");
     }
   }
   return item;
 }
 
 // =============================================================================
-// BLOQUE 10 — SECUENCIA TICKETS (Sin salto regresivo)
+// BLOQUE 10 - SECUENCIA TICKETS (Sin salto regresivo)
 // [DATA-05]
 // =============================================================================
 
@@ -222,7 +222,7 @@ export async function SecuenciaTickets_beforeUpdate(item, context) {
 }
 
 // =============================================================================
-// BLOQUE 11 — CIERRE DE INVENTARIO FIRMADO
+// BLOQUE 11 - CIERRE DE INVENTARIO FIRMADO
 // =============================================================================
 
 export function InventarioStockVentaCierre_beforeUpdate(item, context) {

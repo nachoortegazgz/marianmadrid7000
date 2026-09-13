@@ -1,6 +1,16 @@
-# dependencies
+```
+# Dependencies
 node_modules/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
 .vscode/
-.idea/
-.wix/
-jsconfig.json
+```

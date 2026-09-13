@@ -57,7 +57,7 @@ import { requireAdmin, rateLimiter } from "backend/security";
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 — CONSTANTES CANONICAS DEL SSOT
+// BLOQUE 1 - CONSTANTES CANONICAS DEL SSOT
 // =============================================================================
 const SERVICIOS_COL = COLLECTIONS.SERVICIOS_CATALOGO;
 const DUAL_CACHE_COL = COLLECTIONS.DUAL_SLOT_CACHE;
@@ -74,7 +74,7 @@ const CACHE_MAX_SIZE = SDK_CONFIG.CACHE.MAX_ENTRIES;
 const DAYS_CACHE_VERSION = SDK_CONFIG.CACHE.DAYS_CACHE_VERSION;
 
 // =============================================================================
-// BLOQUE 2 — RESOLUCION DE LOCATION
+// BLOQUE 2 - RESOLUCION DE LOCATION
 // =============================================================================
 function _resolveTimeSlotsLocationOrThrow() {
   const id = _safeTrim(SDK_CONFIG?.LOCATION_ID);
@@ -89,7 +89,7 @@ const LOCATION_TS = _resolveTimeSlotsLocationOrThrow();
 const ACTIVE_NATIVE_ADDON_IDS = new Set(BOOKINGS_ADDON_CONFIG.ACTIVE_NATIVE_IDS);
 
 // =============================================================================
-// BLOQUE 3 — CACHE RAM MULTICAPA
+// BLOQUE 3 - CACHE RAM MULTICAPA
 // =============================================================================
 const availabilityCache = new Map();
 const inflightRequests = new Map();
@@ -118,7 +118,7 @@ async function _getStaffDisplayName(resourceId) {
 }
 
 // =============================================================================
-// BLOQUE 4 — HELPERS
+// BLOQUE 4 - HELPERS
 // =============================================================================
 function _toPublicError(err, fallbackCode = "INTERNAL_ERROR", fallbackMessage = "Internal Error") {
   return { code: String(err?.code || fallbackCode), message: String(err?.message || fallbackMessage) };
@@ -221,7 +221,7 @@ function _minutesBetweenUtcDates(a, b) {
 }
 
 // =============================================================================
-// BLOQUE 5 — MAPEO DE SERVICIO (ServiciosCatalogo -> UX)
+// BLOQUE 5 - MAPEO DE SERVICIO (ServiciosCatalogo -> UX)
 // =============================================================================
 async function _mapServiceToPresentation(service, traceId) {
   const serviceId = _safeTrim(service.serviceId || service._id);
@@ -290,7 +290,7 @@ async function _mapServiceToPresentation(service, traceId) {
 }
 
 // =============================================================================
-// BLOQUE 6 — RESOLUCION DE SERVICIO (INTERNO)
+// BLOQUE 6 - RESOLUCION DE SERVICIO (INTERNO)
 // =============================================================================
 async function _getServiceBySlugOrIdInternal(slugOrId, externalTraceId = null) {
   const traceId = externalTraceId || makeTraceId("service");
@@ -363,7 +363,7 @@ async function _resolveServiceIdInternal(candidate) {
 }
 
 // =============================================================================
-// BLOQUE 7 — BOOKINGS V2: LIST TIME SLOTS
+// BLOQUE 7 - BOOKINGS V2: LIST TIME SLOTS
 // =============================================================================
 async function _listTimeSlotsV2({ serviceId, fromLocalDate, toLocalDate, resourceIds, nativeAddonIds = [] }, options = {}) {
   const { skipCache = false, timeSlotsPerDay } = options;
@@ -443,7 +443,7 @@ async function _listTimeSlotsV2({ serviceId, fromLocalDate, toLocalDate, resourc
 }
 
 // =============================================================================
-// BLOQUE 8 — BALANCEO POR CARGA HORARIA
+// BLOQUE 8 - BALANCEO POR CARGA HORARIA
 // =============================================================================
 async function _getBookedMinutesByResourceForDay(dateYMD, resourceIds, traceId) {
   const ymd = String(dateYMD || "").slice(0, 10);
@@ -512,7 +512,7 @@ async function _pickLeastLoadedResource(candidateResourceIds, dateYMD, traceId) 
 }
 
 // =============================================================================
-// BLOQUE 9 — NEXT SLOT (para F2 dual)
+// BLOQUE 9 - NEXT SLOT (para F2 dual)
 // =============================================================================
 async function _findNextSlotForServiceInternal(serviceId, fromLocalDateTime, requiredResourceId, traceId, sameDayOnly = false) {
   const resolvedServiceId = await _resolveServiceIdInternal(serviceId);
@@ -545,7 +545,7 @@ async function _findNextSlotForServiceInternal(serviceId, fromLocalDateTime, req
 }
 
 // =============================================================================
-// BLOQUE 10 — SLOTS DUALES CERTIFICADOS CON GAP
+// BLOQUE 10 - SLOTS DUALES CERTIFICADOS CON GAP
 // =============================================================================
 export async function _cleanExpiredDualSlotsInternal({ limit = 100, traceId = null } = {}) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 100));
@@ -705,7 +705,7 @@ export async function _getCertifiedDualSlotsInternal(serviceId, resourceId, date
 }
 
 // =============================================================================
-// BLOQUE 11 — REVALIDACION DE SLOT EXACTO
+// BLOQUE 11 - REVALIDACION DE SLOT EXACTO
 // =============================================================================
 export async function revalidateExactAvailabilitySlot({ serviceId, localStartDate, localEndDate, resourceId, nativeAddonIds = [], traceId }) {
   const activeTraceId = traceId || makeTraceId("exact-slot");
@@ -811,7 +811,7 @@ export async function revalidateExactAvailabilitySlot({ serviceId, localStartDat
 }
 
 // =============================================================================
-// BLOQUE 12 — INVALIDACION DE CACHES [FIX E-34 APLICADO]
+// BLOQUE 12 - INVALIDACION DE CACHES [FIX E-34 APLICADO]
 // =============================================================================
 export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, traceId) {
   const tId = traceId || makeTraceId("inv-cache");
@@ -847,7 +847,7 @@ export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, 
 }
 
 // =============================================================================
-// BLOQUE 13 — RESOLUCION DE STAFF PARA SLOT (IMPLEMENTACION COMPLETA)
+// BLOQUE 13 - RESOLUCION DE STAFF PARA SLOT (IMPLEMENTACION COMPLETA)
 // =============================================================================
 export async function _resolveStaffForSlotInternal({
   serviceId,
@@ -1002,7 +1002,7 @@ export async function _resolveStaffForSlotInternal({
 }
 
 // =============================================================================
-// BLOQUE 14 — WEB METHODS PUBLICOS
+// BLOQUE 14 - WEB METHODS PUBLICOS
 // =============================================================================
 export const getServiceBySlugOrId = webMethod(Permissions.Anyone, async (slugOrId) => {
   const traceId = makeTraceId("wm-svc");
