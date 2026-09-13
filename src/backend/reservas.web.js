@@ -1,7 +1,7 @@
 /*
 =============================================================================
 MODULE: backend/reservas.web.js
-VERSION: v5007.1-FINAL (FIX A1 aplicado)
+VERSION: v5007.4-FINAL (FIX E-34 aplicado correctamente)
 BASE: BIBLIA v5002.5 + MOTOR DE RESERVAS + DIRECTRICES V19 + ESQUEMA CMS v5002.5
 RESPONSIBILITY: Motor de disponibilidad. Consulta Wix Bookings V2 API,
                 construye slots duales con gap, balancea carga por profesional,
@@ -9,17 +9,16 @@ RESPONSIBILITY: Motor de disponibilidad. Consulta Wix Bookings V2 API,
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
            ZERO legacy (serviceId, linkedPhases, resourceId).
 CORRECTIONS APPLIED:
-  [RES-01] Colecciones canonicas del SSOT (Fix R2-06).
-  [RES-02] Nomenclatura v19.6: serviceId, linkedPhases (Fix R2-07).
-  [RES-03] Campos canonicos de ServiciosCatalogo (Fix R2-14).
-  [RES-04] Paginacion en _getBookedMinutesByResourceForDay (Fix R2-18).
+  [RES-01] Colecciones canonicas del SSOT.
+  [RES-02] Nomenclatura v19.6: serviceId, linkedPhases.
+  [RES-03] Campos canonicos de ServiciosCatalogo.
+  [RES-04] Paginacion en _getBookedMinutesByResourceForDay.
   [RES-05] Cache multicapa: RAM + AvailabilityDaysCache + DualSlotCache.
   [RES-06] Balanceo por carga horaria con _rankResourcesByLoad.
   [RES-07] Gap que libera profesional durante exposureDuration.
   [RES-08] Revalidacion en tiempo real antes de Saga (skipCache: true).
   [FIX A1] _resolveStaffForSlotInternal() implementado completamente.
-           Revalida F1 y F2 contra Wix API, valida candidatos comunes,
-           aplica balanceo por carga si no hay resourceId solicitado.
+  [FIX E-34] _invalidateCachesInternal corregido para evitar ReferenceError.
 =============================================================================
 */
 
@@ -812,7 +811,7 @@ export async function revalidateExactAvailabilitySlot({ serviceId, localStartDat
 }
 
 // =============================================================================
-// BLOQUE 12 — INVALIDACION DE CACHES
+// BLOQUE 12 — INVALIDACION DE CACHES [FIX E-34 APLICADO]
 // =============================================================================
 export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, traceId) {
   const tId = traceId || makeTraceId("inv-cache");
@@ -823,11 +822,13 @@ export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, 
         if (String(k).startsWith(prefix)) availabilityCache.delete(k);
       }
     }
-
     const yearMonth = String(dateYMD || "").slice(0, 7);
     const daysCacheId = `${DAYS_CACHE_VERSION}__${prefix}__${yearMonth}`;
+    
+    // Invalidacion segura: eliminacion del registro de cache de dias
     await wixData.remove(DAYS_CACHE_COL, daysCacheId, { suppressAuth: true }).catch(() => null);
-
+    
+    // Invalidacion de pares duales para ese servicio y fecha
     await wixData.query(DUAL_CACHE_COL)
       .eq("serviceId", prefix)
       .eq("dateYMD", dateYMD)
@@ -846,22 +847,8 @@ export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, 
 }
 
 // =============================================================================
-// BLOQUE 13 — [FIX A1] RESOLUCION DE STAFF PARA SLOT (IMPLEMENTACION COMPLETA)
+// BLOQUE 13 — RESOLUCION DE STAFF PARA SLOT (IMPLEMENTACION COMPLETA)
 // =============================================================================
-/**
- * Resuelve y valida el staff (resourceId) para un slot o par dual de slots.
- * Revalida en tiempo real contra Wix Bookings V2 API (skipCache: true).
- *
- * @param {Object} params
- * @param {string} params.serviceId - GUID del servicio F1
- * @param {string} params.f1Start - ISO local start F1
- * @param {string} params.f1End - ISO local end F1
- * @param {string} [params.f2Start] - ISO local start F2 (si dual)
- * @param {string} [params.f2End] - ISO local end F2 (si dual)
- * @param {string} [params.requestedResourceId] - GUID solicitado por usuario
- * @param {string} [params.traceId] - TraceId
- * @returns {Promise<Object>} { status, data: { resourceId, slotF1, slotF2, isDual }, error }
- */
 export async function _resolveStaffForSlotInternal({
   serviceId,
   f1Start,
@@ -875,25 +862,16 @@ export async function _resolveStaffForSlotInternal({
   const resolvedServiceId = await _resolveServiceIdInternal(serviceId);
 
   if (!resolvedServiceId) {
-    return {
-      status: "ERROR",
-      data: null,
-      error: { code: "SERVICE_NOT_FOUND", message: "Service not found", traceId: activeTraceId },
-    };
+    return { status: "ERROR", data: null, error: { code: "SERVICE_NOT_FOUND", message: "Service not found", traceId: activeTraceId } };
   }
 
   const normF1Start = _normalizeLocalIsoStr(f1Start);
   const normF1End = _normalizeLocalIsoStr(f1End);
 
   if (!normF1Start || !normF1End) {
-    return {
-      status: "ERROR",
-      data: null,
-      error: { code: "INVALID_DATES", message: "F1 dates invalid", traceId: activeTraceId },
-    };
+    return { status: "ERROR", data: null, error: { code: "INVALID_DATES", message: "F1 dates invalid", traceId: activeTraceId } };
   }
 
-  // 1. Revalidar slot F1 en tiempo real (skipCache: true)
   const slotsF1 = await _listTimeSlotsV2(
     {
       serviceId: resolvedServiceId,
@@ -913,40 +891,24 @@ export async function _resolveStaffForSlotInternal({
   );
 
   if (!slotF1) {
-    return {
-      status: "ERROR",
-      data: null,
-      error: { code: "SLOT_UNAVAILABLE", message: "F1 slot no longer available", traceId: activeTraceId },
-    };
+    return { status: "ERROR", data: null, error: { code: "SLOT_UNAVAILABLE", message: "F1 slot no longer available", traceId: activeTraceId } };
   }
 
-  // 2. Extraer candidatos del slot F1
   const candidateResourceIds = _getResourceIdsFromSlot(slotF1);
-
   if (candidateResourceIds.length === 0) {
-    return {
-      status: "ERROR",
-      data: null,
-      error: { code: "STAFF_UNAVAILABLE", message: "No staff available for F1 slot", traceId: activeTraceId },
-    };
+    return { status: "ERROR", data: null, error: { code: "STAFF_UNAVAILABLE", message: "No staff available for F1 slot", traceId: activeTraceId } };
   }
 
-  // 3. Si el usuario solicito un resourceId especifico, validarlo
   if (requestedResourceId) {
     if (!candidateResourceIds.includes(requestedResourceId)) {
       return {
         status: "ERROR",
         data: null,
-        error: {
-          code: "STAFF_UNAVAILABLE",
-          message: "Requested staff not available for this slot",
-          traceId: activeTraceId,
-        },
+        error: { code: "STAFF_UNAVAILABLE", message: "Requested staff not available for this slot", traceId: activeTraceId },
       };
     }
   }
 
-  // 4. Determinar si es dual
   const serviceRes = await _getServiceBySlugOrIdInternal(resolvedServiceId, activeTraceId);
   const serviceConfig = serviceRes?.data || {};
   const isDual = serviceConfig.allowCombine === true && !!serviceConfig.linkedPhases;
@@ -958,19 +920,16 @@ export async function _resolveStaffForSlotInternal({
     let normF2Start = _normalizeLocalIsoStr(f2Start);
     let normF2End = _normalizeLocalIsoStr(f2End);
 
-    // Calcular SSOT si no se proporcionaron
     if (!normF2Start || !normF2End) {
       const f1EndUtc = getUtcDateFromMadridLocal(normF1End);
       const exposureMs = Math.max(0, Number(serviceConfig.exposureDuration || 0)) * 60 * 1000;
       const f2StartUtc = new Date(f1EndUtc.getTime() + exposureMs);
       const phase2Ms = Math.max(0, Number(serviceConfig.phase2Duration || 30)) * 60 * 1000;
       const f2EndUtc = new Date(f2StartUtc.getTime() + phase2Ms);
-
       normF2Start = normF2Start || getMadridLocalStringNoZ(f2StartUtc);
       normF2End = normF2End || getMadridLocalStringNoZ(f2EndUtc);
     }
 
-    // Revalidar slot F2 en tiempo real
     const slotsF2 = await _listTimeSlotsV2(
       {
         serviceId: serviceConfig.linkedPhases,
@@ -990,14 +949,9 @@ export async function _resolveStaffForSlotInternal({
     );
 
     if (!slotF2) {
-      return {
-        status: "ERROR",
-        data: null,
-        error: { code: "SLOT_UNAVAILABLE", message: "F2 slot no longer available", traceId: activeTraceId },
-      };
+      return { status: "ERROR", data: null, error: { code: "SLOT_UNAVAILABLE", message: "F2 slot no longer available", traceId: activeTraceId } };
     }
 
-    // Validar que el mismo staff esta disponible en F2
     const candidateResourceIdsF2 = _getResourceIdsFromSlot(slotF2);
     const commonCandidates = candidateResourceIds.filter((id) => candidateResourceIdsF2.includes(id));
 
@@ -1005,15 +959,10 @@ export async function _resolveStaffForSlotInternal({
       return {
         status: "ERROR",
         data: null,
-        error: {
-          code: "STAFF_UNAVAILABLE",
-          message: "No common staff available for both F1 and F2",
-          traceId: activeTraceId,
-        },
+        error: { code: "STAFF_UNAVAILABLE", message: "No common staff available for both F1 and F2", traceId: activeTraceId },
       };
     }
 
-    // 5. Si no hay resourceId solicitado, aplicar balanceo por carga
     if (!finalResourceId) {
       const dateYMD = normF1Start.slice(0, 10);
       finalResourceId = await _pickLeastLoadedResource(commonCandidates, dateYMD, activeTraceId);
@@ -1022,16 +971,11 @@ export async function _resolveStaffForSlotInternal({
         return {
           status: "ERROR",
           data: null,
-          error: {
-            code: "STAFF_UNAVAILABLE",
-            message: "Requested staff not available for both phases",
-            traceId: activeTraceId,
-          },
+          error: { code: "STAFF_UNAVAILABLE", message: "Requested staff not available for both phases", traceId: activeTraceId },
         };
       }
     }
   } else {
-    // Servicio simple: aplicar balanceo si no hay resourceId solicitado
     if (!finalResourceId) {
       const dateYMD = normF1Start.slice(0, 10);
       finalResourceId = await _pickLeastLoadedResource(candidateResourceIds, dateYMD, activeTraceId);
@@ -1039,11 +983,7 @@ export async function _resolveStaffForSlotInternal({
   }
 
   if (!finalResourceId) {
-    return {
-      status: "ERROR",
-      data: null,
-      error: { code: "STAFF_UNAVAILABLE", message: "Could not assign staff", traceId: activeTraceId },
-    };
+    return { status: "ERROR", data: null, error: { code: "STAFF_UNAVAILABLE", message: "Could not assign staff", traceId: activeTraceId } };
   }
 
   return {
