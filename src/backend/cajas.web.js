@@ -135,7 +135,8 @@ async function _getNextSequenceNumbers(year, traceId) {
     if (!lockResult?.ok) {
         throw createBookingError(
             ERROR_CODES.TOKEN_BUSY,
-            "Fiscal sequence generation busy, retry later", { traceId }
+            "Fiscal sequence generation busy, retry later",
+            { traceId }
         );
     }
 
@@ -205,9 +206,9 @@ async function _getNextSequenceNumbers(year, traceId) {
 async function _getUltimoHashYSecuencia() {
     const res = await withTimeout(
         wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
-        .descending("seqGlobal")
-        .limit(1)
-        .find({ suppressAuth: true, consistentRead: true }),
+            .descending("seqGlobal")
+            .limit(1)
+            .find({ suppressAuth: true, consistentRead: true }),
         CMS_TIMEOUT_MS,
         "_getUltimoHashYSecuencia"
     );
