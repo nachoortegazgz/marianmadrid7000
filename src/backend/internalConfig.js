@@ -1,7 +1,7 @@
 /*
 =============================================================================
 MODULE: backend/internalConfig.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.3-FINAL
 BASE: BIBLIA_DEFINITIVA v5002.5 + ESQUEMA CMS v5002.5 + DIRECTRICES V19
 RESPONSIBILITY: Single Source of Truth (SSOT) for backend configuration:
                 - Canonical PascalCase CMS collection IDs (32 + 1 aux)
@@ -9,8 +9,11 @@ RESPONSIBILITY: Single Source of Truth (SSOT) for backend configuration:
                 - SDK V2 execution constraints
                 - Business enums (frozen, zero legacy)
                 - Staff, concurrency, timeouts, caches, rate limits
+                - Validation helpers for addon IDs
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
            ZERO deprecated keys. ZERO legacy aliases. ZERO trailing spaces.
+CORRECTIONS APPLIED:
+  [FIX-D4] validateActiveNativeAddonIds() helper para validacion de GUIDs.
 =============================================================================
 */
 
@@ -19,9 +22,9 @@ STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 // =============================================================================
 export const STAFF = Object.freeze({
   IDS: Object.freeze([
-    "e556070a-6d6a-402e-8422-11133033ea76", // MARIAN MADRID (PROPIETARIA/ADMIN)
-    "07f7344f-e7e4-4c53-854b-47fd82ac8d40", // ANDREA STAFF (ESTILISTA)
-    "9b905bfd-1a09-485d-9273-a24a20dfe648", // ALBA STAFF (ESTILISTA)
+    "e556070a-6d6a-402e-8422-11133033ea76",
+    "07f7344f-e7e4-4c53-854b-47fd82ac8d40",
+    "9b905bfd-1a09-485d-9273-a24a20dfe648",
   ]),
   RESOURCE_TO_DISPLAY: Object.freeze({
     "e556070a-6d6a-402e-8422-11133033ea76": "Marian Madrid",
@@ -31,43 +34,41 @@ export const STAFF = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 2 — COLECCIONES CMS CANÓNICAS (32 + 1 auxiliar)
-// Decreto v5002.5 + ESQUEMA CMS v5002.5 Sección 4
-// CERO legacy: purgado CITAS, DUAL_CACHE, SERVICIOS_CITA, MmLocks, etc.
+// BLOQUE 2 — COLECCIONES CMS CANONICAS (32 + 1 auxiliar)
 // =============================================================================
 export const COLLECTIONS = Object.freeze({
-  // --- M1: Catálogo y maestros ---
+  // M1: Catalogo y maestros
   CATEGORIAS_SERVICIO: "CategoriasServicio",
   SERVICIOS_CATALOGO: "ServiciosCatalogo",
   COMPLEMENTOS_CATALOGO: "ComplementosCatalogo",
   MAPA_STAFF: "MapaStaff",
   CITAS_F2: "CitasF2",
 
-  // --- M2: Caché de disponibilidad ---
+  // M2: Cache de disponibilidad
   AVAILABILITY_DAYS_CACHE: "AvailabilityDaysCache",
   DUAL_SLOT_CACHE: "DualSlotCache",
 
-  // --- M3: Orquestación transaccional ---
+  // M3: Orquestacion transaccional
   BOOKING_TRANSACTIONS: "BookingTransactions",
   BOOKINGS_SERVICE_SYNC_QUEUE: "BookingsServiceSyncQueue",
   COMPENSACIONES_PENDIENTES: "CompensacionesPendientes",
   M365_GRAPH_SYNC_QUEUE: "M365GraphSyncQueue",
   MM_PROCESSED_EVENTS: "MM_ProcessedEvents",
 
-  // --- M4: Inventario ---
+  // M4: Inventario
   INVENTARIO_STOCK_VENTA: "InventarioStockVenta",
   MOVIMIENTOS_INVENTARIO: "MovimientosInventario",
   INVENTARIO_STOCK_VENTA_CIERRE: "InventarioStockVentaCierre",
   PROVEEDORES_LISTA: "ProveedoresLista",
 
-  // --- M5: Caja física y cierres ---
+  // M5: Caja fisica y cierres
   CAJA_ACTUAL: "CajaActual",
   MOVIMIENTOS_CAJA: "MovimientosCaja",
   CONTROL_PARCIAL_X: "ControlParcialX",
   HISTORICO_CIERRES_Z: "HistoricoCierresZ",
   SECUENCIA_TICKETS: "SecuenciaTickets",
 
-  // --- M6: Fiscal y contable (PGC) ---
+  // M6: Fiscal y contable (PGC)
   CONFIGURACION_FISCAL: "ConfiguracionFiscal",
   LIBRO_IVA_FACTURAS_EXPEDIDAS: "LibroIVAFacturasExpedidas",
   LIBRO_IVA_FACTURAS_RECIBIDAS: "LibroIVAFacturasRecibidas",
@@ -76,20 +77,19 @@ export const COLLECTIONS = Object.freeze({
   LINEAS_ASIENTO_CONTABLE: "LineasAsientoContable",
   LIBRO_MAYOR_CONTABLE_SALDOS: "LibroMayorContableSaldos",
 
-  // --- M7: Auditoría, SIF y laboral ---
+  // M7: Auditoria, SIF y laboral
   EVENTOS_SISTEMA_FACTURACION: "EventosSistemaFacturacion",
   MM_AUDIT_LOG: "MmAuditLog",
   REGISTROS_HORARIOS_STAFF: "RegistrosHorariosStaff",
 
-  // --- Infraestructura ---
+  // Infraestructura
   SLOT_LOCKS: "SlotLocks",
   RATE_LIMIT_BLOCKS: "RateLimitBlocks",
   ALERTAS_OPERATIVAS: "AlertasOperativas",
 });
 
 // =============================================================================
-// BLOQUE 3 — WIX APP IDs (fuentes nativas de eventos)
-// BIBLIA v5002.5 Bloque 2
+// BLOQUE 3 — WIX APP IDs
 // =============================================================================
 export const APP_IDS = Object.freeze({
   BOOKINGS: "13d21c63-b5ec-5912-8397-c3a5ddb27a97",
@@ -103,7 +103,6 @@ export const APP_IDS = Object.freeze({
 
 // =============================================================================
 // BLOQUE 4 — API KEYS Y RECURSOS WIX NATIVOS
-// BIBLIA v5002.5 Bloque 7
 // =============================================================================
 export const API = Object.freeze({
   STAFF_RESOURCE_TYPE_ID: "1cd44cf8-756f-41c3-bd90-3e2ffcaf1155",
@@ -118,8 +117,7 @@ export const SINGLETONS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 6 — CONFIGURACIÓN GLOBAL DEL SDK
-// BIBLIA v5002.5 Bloque 3 + 4
+// BLOQUE 6 — CONFIGURACION GLOBAL DEL SDK
 // =============================================================================
 export const SDK_CONFIG = Object.freeze({
   TZ: "Europe/Madrid",
@@ -199,7 +197,6 @@ export const SDK_CONFIG = Object.freeze({
 
 // =============================================================================
 // BLOQUE 7 — CONCURRENCIA, LOCKS Y TRANSACCIONES
-// BIBLIA v5002.5 Bloque 5
 // =============================================================================
 export const CONCURRENCY = Object.freeze({
   MUTEX_TTL_MS: 300000,
@@ -214,8 +211,7 @@ export const CONCURRENCY = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 8 — ENUMS DE NEGOCIO (frozen, cero legacy)
-// BIBLIA v5002.5 Bloque 6 + ESQUEMA v5002.5 Sección 5 (CHOICES -> TEXT+hook)
+// BLOQUE 8 — ENUMS DE NEGOCIO
 // =============================================================================
 export const TIPO_FICHAJE = Object.freeze({
   ENTRADA: "ENTRADA",
@@ -291,7 +287,7 @@ export const COLLAB_ROLES = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 9 — CONSTANTES DE CATÁLOGO Y BÚSQUEDA DE SLOTS
+// BLOQUE 9 — CONSTANTES DE CATALOGO Y BUSQUEDA DE SLOTS
 // =============================================================================
 export const SERVICE_CATALOG = Object.freeze({
   STATES: Object.freeze({
@@ -314,7 +310,8 @@ export const SLOT_SEARCH = Object.freeze({
 export const BOOKINGS_ADDON_CONFIG = Object.freeze({
   MAX_PER_BOOKING: 5,
   ACTIVE_NATIVE_IDS: Object.freeze([
-    // TODO: Poblar desde el panel de Wix Bookings antes de producción
+    // TODO: Poblar desde el panel de Wix Bookings antes de produccion.
+    // Formato: ["GUID-addon-1", "GUID-addon-2", ...]
   ]),
 });
 
@@ -327,7 +324,7 @@ export const JWT = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 11 — CAMPOS DE CITA (alineación API V2)
+// BLOQUE 11 — CAMPOS DE CITA
 // =============================================================================
 export const CITA_FIELDS = Object.freeze({
   STATUS: "status",
@@ -361,8 +358,7 @@ export const MONEY = Object.freeze({
 export const STAFF_DEFAULT_NAME = "Profesional";
 
 // =============================================================================
-// BLOQUE 14 — IDENTIDADES LEGACY PROHIBIDAS (forbiddenLegacyIds)
-// Exportadas como referencia para hooks y migración. NO USAR en nuevo código.
+// BLOQUE 14 — IDENTIDADES LEGACY PROHIBIDAS
 // =============================================================================
 export const FORBIDDEN_LEGACY_IDS = Object.freeze({
   primaryServiceGuid: "serviceId",
@@ -378,15 +374,29 @@ export const FORBIDDEN_LEGACY_IDS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 15 — ALIASES DE COMPATIBILIDAD (deprecados, solo lectura)
-// Se exponen SOLO para que módulos legacy no rompan durante la migración.
-// Se eliminarán en la Ronda 2 de migración de datos.
+// BLOQUE 15 — [FIX-D4] VALIDACION DE ACTIVE_NATIVE_IDS
 // =============================================================================
-export const _DEPRECATED_ALIASES = Object.freeze({
-  CITAS: COLLECTIONS.CITAS_F2,
-  DAYS_CACHE: COLLECTIONS.AVAILABILITY_DAYS_CACHE,
-  DUAL_CACHE: COLLECTIONS.DUAL_SLOT_CACHE,
-  SERVICIOS_CITA: COLLECTIONS.SERVICIOS_CATALOGO,
-  LOCKS: COLLECTIONS.SLOT_LOCKS,
-  TRANSACTIONS: COLLECTIONS.BOOKING_TRANSACTIONS,
-});
+
+/**
+ * Valida que todos los ACTIVE_NATIVE_IDS son GUIDs validos.
+ * Llamar en systemHealthCheck o en el arranque del modulo reservas.web.js.
+ *
+ * @returns {Object} { valid: boolean, invalidIds: string[], count: number, isEmpty: boolean }
+ */
+export function validateActiveNativeAddonIds() {
+  const ids = BOOKINGS_ADDON_CONFIG.ACTIVE_NATIVE_IDS;
+  const invalidIds = [];
+
+  for (const id of ids) {
+    if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      invalidIds.push(String(id));
+    }
+  }
+
+  return {
+    valid: invalidIds.length === 0,
+    invalidIds,
+    count: ids.length,
+    isEmpty: ids.length === 0,
+  };
+}
