@@ -23,7 +23,7 @@ import { _cleanExpiredDualSlotsInternal } from "backend/reservas.web";
 const log = logger;
 
 // =============================================================================
-// CRON 1: cleanExpiredLocks — 15 * * * * (cada hora :15)
+// CRON 1: cleanExpiredLocks - 15 * * * * (cada hora :15)
 // =============================================================================
 
 export async function cleanExpiredLocks() {
@@ -49,7 +49,7 @@ export async function cleanExpiredLocks() {
 }
 
 // =============================================================================
-// CRON 2: cleanupExpiredDualCache — 20 * * * * (cada hora :20)
+// CRON 2: cleanupExpiredDualCache - 20 * * * * (cada hora :20)
 // =============================================================================
 
 export async function cleanupExpiredDualCache() {
@@ -62,7 +62,7 @@ export async function cleanupExpiredDualCache() {
 }
 
 // =============================================================================
-// CRON 3: runPendingCompensationsJob — 30 * * * * (cada hora :30)
+// CRON 3: runPendingCompensationsJob - 30 * * * * (cada hora :30)
 // =============================================================================
 
 export async function runPendingCompensationsJob() {
@@ -78,8 +78,8 @@ export async function runPendingCompensationsJob() {
     let processed = 0;
     for (const comp of res?.items || []) {
       try {
-        // Reintentar la compensación según tipo
-        // (Lógica específica por tipo de compensación)
+        // Reintentar la compensacion segun tipo
+        // (Logica especifica por tipo de compensacion)
         comp.status = "COMPLETED";
         comp._updatedDate = new Date();
         await wixData.update(COLLECTIONS.COMPENSACIONES_PENDIENTES, comp, { suppressAuth: true });
@@ -100,7 +100,7 @@ export async function runPendingCompensationsJob() {
 }
 
 // =============================================================================
-// CRON 4: cleanExpiredDaysCache — 0 1 * * * (diario 01:00)
+// CRON 4: cleanExpiredDaysCache - 0 1 * * * (diario 01:00)
 // =============================================================================
 
 export async function cleanExpiredDaysCache() {
@@ -126,14 +126,14 @@ export async function cleanExpiredDaysCache() {
 }
 
 // =============================================================================
-// CRON 5: cleanExpiredSlotsCache — 10 1 * * * (diario 01:10)
+// CRON 5: cleanExpiredSlotsCache - 10 1 * * * (diario 01:10)
 // =============================================================================
 
 export async function cleanExpiredSlotsCache() {
   const traceId = makeTraceId("cron-slots-cache");
   try {
-    // La caché RAM de slots se resetea automáticamente en serverless.
-    // Este cron sirve como documentación del ciclo de vida.
+    // La cache RAM de slots se resetea automaticamente en serverless.
+    // Este cron sirve como documentacion del ciclo de vida.
     log.info("cleanExpiredSlotsCache completed (RAM cache auto-resets on cold start)", { traceId });
   } catch (err) {
     log.error("cleanExpiredSlotsCache failed", { error: err?.message, traceId });
@@ -141,7 +141,7 @@ export async function cleanExpiredSlotsCache() {
 }
 
 // =============================================================================
-// CRON 6: systemHealthCheck — 0 7 * * * (diario 07:00)
+// CRON 6: systemHealthCheck - 0 7 * * * (diario 07:00)
 // =============================================================================
 
 export async function systemHealthCheck() {
@@ -154,7 +154,7 @@ export async function systemHealthCheck() {
       secrets: {},
     };
 
-    // Verificar colecciones críticas
+    // Verificar colecciones criticas
     const criticalCols = [
       COLLECTIONS.CITAS_F2,
       COLLECTIONS.MOVIMIENTOS_CAJA,

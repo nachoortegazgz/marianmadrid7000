@@ -2,9 +2,9 @@
 =============================================================================
 MODULE: backend/fiscalDocuments.web.js
 VERSION: v5002.2-FINAL
-BASE: BIBLIA v5002.5 + DOSSIER CAJA §29
+BASE: BIBLIA v5002.5 + DOSSIER CAJA S29
 RESPONSIBILITY: Genera paquetes fiscales trimestrales, documentos CSV/PDF,
- mantiene historial de versiones y despacha vía Resend API.
+ mantiene historial de versiones y despacha via Resend API.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 =============================================================================
 */
@@ -31,7 +31,7 @@ const MAX_EMAIL_SEND_ATTEMPTS = SDK_CONFIG?.DOCUMENTS?.MAX_EMAIL_SEND_ATTEMPTS |
 const DEFAULT_MANAGER_EMAIL = SDK_CONFIG?.DOCUMENTS?.DEFAULT_MANAGER_EMAIL || "gestion@marianmadrid.es";
 
 // =============================================================================
-// BLOQUE 1 — HELPERS
+// BLOQUE 1 - HELPERS
 // =============================================================================
 
 function _formatDocumentId(year, quarter, version = 1) {
@@ -75,7 +75,7 @@ function _buildSummaryText(summary) {
 }
 
 // =============================================================================
-// BLOQUE 2 — PREVIEW DE PAQUETE
+// BLOQUE 2 - PREVIEW DE PAQUETE
 // =============================================================================
 
 export const previewManagerPackage = webMethod(Permissions.SiteMember, async (period = {}) => {
@@ -113,7 +113,7 @@ export const previewManagerPackage = webMethod(Permissions.SiteMember, async (pe
 });
 
 // =============================================================================
-// BLOQUE 3 — CREAR VERSIÓN DE PAQUETE
+// BLOQUE 3 - CREAR VERSION DE PAQUETE
 // =============================================================================
 
 export const createManagerPackageVersion = webMethod(Permissions.SiteMember, async (period = {}) => {
@@ -165,7 +165,7 @@ export const createManagerPackageVersion = webMethod(Permissions.SiteMember, asy
 });
 
 // =============================================================================
-// BLOQUE 4 — HISTORIAL DE PAQUETES
+// BLOQUE 4 - HISTORIAL DE PAQUETES
 // =============================================================================
 
 export const getManagerPackageHistory = webMethod(Permissions.SiteMember, async (period = {}) => {
@@ -210,7 +210,7 @@ export const getPreparedManagerPackages = webMethod(Permissions.SiteMember, asyn
 });
 
 // =============================================================================
-// BLOQUE 5 — DESCARGAR VERSIÓN
+// BLOQUE 5 - DESCARGAR VERSION
 // =============================================================================
 
 export const downloadManagerPackageVersion = webMethod(Permissions.SiteMember, async (params = {}) => {
@@ -254,7 +254,7 @@ export const downloadManagerPackageVersion = webMethod(Permissions.SiteMember, a
 });
 
 // =============================================================================
-// BLOQUE 6 — ENVIAR POR EMAIL
+// BLOQUE 6 - ENVIAR POR EMAIL
 // =============================================================================
 
 export const emailManagerPackageVersion = webMethod(Permissions.SiteMember, async (params = {}) => {
@@ -306,7 +306,7 @@ export const emailManagerPackageVersion = webMethod(Permissions.SiteMember, asyn
     const resendPayload = {
       from: `Marian Madrid <${fromEmail}>`,
       to: [recipient],
-      subject: `[Gestoría] Paquete Fiscal ${documentId}`,
+      subject: `[Gestoria] Paquete Fiscal ${documentId}`,
       text: `Adjunto resumen fiscal y extracto del libro diario para el paquete ${documentId}.\n\n${downloadRes.data.summaryText}\n\nGenerado: ${new Date().toISOString()}`,
       attachments: [
         {

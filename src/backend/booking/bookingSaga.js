@@ -51,7 +51,7 @@ import {
   _executeWithRetry,
 } from "public/mmUtils";
 
-// [FIX A5] IMPORT COMPLETO DE bookingCore.js — incluye _extractCheckoutId
+// [FIX A5] IMPORT COMPLETO DE bookingCore.js - incluye _extractCheckoutId
 import {
   createBookingElevated,
   cancelBookingElevated,
@@ -73,7 +73,7 @@ import {
   _handleError,
   ERROR_CODES,
   _updateCitaSafe,
-  _extractCheckoutId, // ← [FIX A5] Añadido para resolver error linea 558
+  _extractCheckoutId, // [FIX A5] Anadido para resolver error linea 558
 } from "backend/booking/bookingCore";
 
 // [FIX A5] Re-export para que otros modulos puedan importarlo desde aqui
@@ -94,7 +94,7 @@ const CITAS_COL = COLLECTIONS.CITAS_F2;
 const COMPENSACIONES_COL = COLLECTIONS.COMPENSACIONES_PENDIENTES;
 
 // =============================================================================
-// BLOQUE 1 — PAIR TOKEN DETERMINISTA
+// BLOQUE 1 - PAIR TOKEN DETERMINISTA
 // =============================================================================
 function _resolveStablePairToken({ serviceId, resourceId, f1Start, f2Start, email, existingPairToken }) {
   const existing = _safeTrim(existingPairToken);
@@ -112,7 +112,7 @@ function _resolveStablePairToken({ serviceId, resourceId, f1Start, f2Start, emai
 }
 
 // =============================================================================
-// BLOQUE 2 — NORMALIZACION DE META PERSISTIDA
+// BLOQUE 2 - NORMALIZACION DE META PERSISTIDA
 // =============================================================================
 export function _normalizePersistedMeta(meta) {
   if (!meta || typeof meta !== "object") return {};
@@ -125,7 +125,7 @@ export function _normalizePersistedMeta(meta) {
 }
 
 // =============================================================================
-// BLOQUE 3 — LIBERACION DE LOCKS (BEST EFFORT)
+// BLOQUE 3 - LIBERACION DE LOCKS (BEST EFFORT)
 // =============================================================================
 async function _bestEffortUnlockAll(lockKeys, lockOwnerId) {
   for (const key of lockKeys || []) {
@@ -138,7 +138,7 @@ async function _bestEffortUnlockAll(lockKeys, lockOwnerId) {
 }
 
 // =============================================================================
-// BLOQUE 4 — COMPENSACION DE BOOKINGS CREADOS
+// BLOQUE 4 - COMPENSACION DE BOOKINGS CREADOS
 // =============================================================================
 async function _compensateCreatedBookings(createdBookings, traceId) {
   for (const booking of createdBookings || []) {
@@ -178,7 +178,7 @@ async function _compensateCreatedBookings(createdBookings, traceId) {
 }
 
 // =============================================================================
-// BLOQUE 5 — SAGA ORCHESTRATOR
+// BLOQUE 5 - SAGA ORCHESTRATOR
 // =============================================================================
 export class BookingSagaOrchestrator {
   constructor(traceId) {
@@ -222,7 +222,7 @@ export class BookingSagaOrchestrator {
 }
 
 // =============================================================================
-// BLOQUE 6 — EXECUTE BOOKING SAGA (FUNCION PRINCIPAL)
+// BLOQUE 6 - EXECUTE BOOKING SAGA (FUNCION PRINCIPAL)
 // =============================================================================
 export async function executeBookingSaga(unsafePayload) {
   const traceId = unsafePayload?.traceId || makeTraceId("saga");
@@ -242,8 +242,8 @@ export async function executeBookingSaga(unsafePayload) {
       metaCita.serviceId ||
       unsafePayload?.primaryServiceId ||
       metaCita.primaryServiceId ||
-      unsafePayload?.primaryServiceGuid ||
-      metaCita.primaryServiceGuid
+      
+      
     );
     const serviceId = await _resolveServiceIdInternal(rawServiceId);
     if (!serviceId || !_looksLikeGuid(serviceId)) {
