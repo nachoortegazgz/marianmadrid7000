@@ -1,11 +1,27 @@
 /*
 =============================================================================
 MODULE: backend/cajas.web.js
-VERSION: marianmadrid4002 (v21.1.0-LTS-remediated)
-RESPONSIBILITY: Internal financial ledger with SHA-256 hash chains,
-            idempotent transaction recording, and chain integrity verification.
-            Complies with Veri*Factu and RD-Ley 8/2019 principles.
+VERSION: v5007.0-FINAL
+BASE: Modulos optimizados 3 + BIBLIA v5002.5 + DOSSIER CAJA + DIRECTRICES V19
+RESPONSIBILITY: TPV cashier ledger, daily closures (Arqueo X / Cierre Z),
+                Veri*factu SHA-256 chain integrity, fiscal persistence,
+                accounting projection, M365 sync enqueue, IDEMPOTENCIA,
+                auditoria completa y control de periodos cerrados.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
+CORRECTIONS APPLIED (Rondas 1-3):
+  [R2-01] Mutex atomico para _getNextSequence() con SlotLocks.
+  [R2-02] Idempotencia por transactionId antes de insertar.
+  [R2-03] _getLastMovement() ordena por sequenceNumber (determinista).
+  [R2-04] await en todas las llamadas a hashSHA256/hmacSha256Hex.
+  [R2-05] Verificar cierre Z existente antes de insertar.
+  [R2-15] Bloqueo de periodo cerrado (_assertPeriodNotClosed).
+  [R2-20] Auditoria de fallos en proyeccion contable y M365.
+  [CI-CAJA-01] Idempotencia por transactionId.
+  [CI-CAJA-02] Control revision saldos.
+  [CI-CAJA-03] Validacion importes/moneda/signo.
+  [CI-CAJA-04] Auditoria movimientos.
+  [CI-CAJA-05] Bloqueo periodos cerrados.
+  [CI-CAJA-06] Prevencion doble cobro/reembolso.
 =============================================================================
 */
 
@@ -14,1093 +30,1078 @@ import wixData from "wix-data";
 import { getSecret } from "wix-secrets-backend";
 
 import {
-    makeTraceId,
-    _roundMoney,
-    _cleanText,
-    _stableSerialize,
-    _normalizeIdPart,
-    withTimeout,
-    _executeWithRetry,
-} from "public/mmUtils";
-import {
-    COLLECTIONS,
-    TIPO_MOVIMIENTO,
-    FORMA_PAGO,
-    IVA_RATES,
-    CAJA_STATUS,
-    SDK_CONFIG,
-    CONCURRENCY,
-    CITA_FIELDS,
-    ESTADO_CITA,
-    ESTADO_PAGO,
+  COLLECTIONS,
+  SINGLETONS,
+  SDK_CONFIG,
+  TIPO_MOVIMIENTO,
+  FORMA_PAGO,
+  IVA_RATES,
+  CAJA_STATUS,
+  CONCURRENCY,
 } from "backend/internalConfig";
 
 import { SECRETS } from "backend/mmSecrets";
+import { requireCajero, requireAdmin, rateLimiter } from "backend/security";
 
 import {
-    logger,
-    ERROR_CODES,
-    createBookingError,
-    normalizeError,
-    _lockSlotKeyOrFail,
-    _unlockSlotKey,
-} from "backend/booking/bookingCore";
+  hashSHA256,
+  hashChain,
+  hmacSha256Hex,
+  timingSafeEqual,
+} from "backend/securityEngine";
 
+import {
+  makeTraceId,
+  _roundMoney,
+  _safeTrim,
+  _cleanText,
+  _stableSerialize,
+  _normalizeIdPart,
+  _readDate,
+  _readPositiveAmount,
+  _readNonNegativeAmount,
+} from "public/mmUtils";
+
+import { logger } from "backend/logger";
+import { normalizeError } from "backend/booking/bookingCore";
 import { _toPublicError } from "backend/responseUtils";
-import { hmacSha256Hex, hashChain } from "backend/securityEngine";
-import { projectLedgerMovementToAccounting } from "backend/contabilidad";
-import { enqueueM365LedgerRecord } from "backend/m365GraphSync";
-import { requireAdmin, requireCajero, rateLimiter } from "backend/security";
+import { _lockSlotKeyOrFail, _unlockSlotKey } from "backend/booking/bookingCore";
 
 const log = logger;
 
-const SEED_SIGNATURE = "0000000000000000000000000000000000000000000000000000000000000000";
-const CMS_TIMEOUT_MS = SDK_CONFIG?.TIMEOUTS?.CMS_MS || 15000;
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
+const CAJA_ACTUAL_ID = SINGLETONS?.CAJA || "CAJA_PRINCIPAL";
+const LEDGER_SCHEMA_VERSION = "LEDGER_V2";
+const INTEGRITY_ALGORITHM_VERSION = "HMAC_SHA256_V1";
+const GENESIS_HASH = "0".repeat(64);
+const MAX_LEDGER_BATCH_PAGES = 50;
+const LEDGER_PAGE_SIZE = 200;
+
+// [R2-01] Mutex para secuencia fiscal
+const SEQUENCE_MUTEX_KEY = "FISCAL_SEQUENCE_LOCK";
+const SEQUENCE_MUTEX_TTL_MS = Number(CONCURRENCY?.LEDGER_MUTEX_TTL_MS) || 45000;
 const LEDGER_MUTEX_KEY = "LEDGER_GLOBAL_WRITE";
 const LEDGER_MUTEX_TTL_MS = Number(CONCURRENCY?.LEDGER_MUTEX_TTL_MS) || 45000;
-const FISCAL_SEQUENCE_MUTEX_KEY = "FISCAL_SEQUENCE_LOCK";
-const FISCAL_SEQUENCE_MUTEX_TTL_MS = 30000;
-const FISCAL_KEY_CACHE_TTL_MS = Number(SDK_CONFIG?.SECURITY?.SECRET_CACHE_TTL_MS) || 300000;
 
-let cachedFiscalKey = null;
-let cachedFiscalNif = null;
-let cacheKeyTime = 0;
-let cacheNifTime = 0;
+function _normalizeLinkedBookingIds(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(",");
+  return Array.from(new Set(values.map((id) => String(id || "").trim()).filter(Boolean)));
+}
+
+function _linkedBookingValue(value) {
+  return _normalizeLinkedBookingIds(value).join(",") || null;
+}
 
 function _rateLimitOrThrow(surface, key, traceId) {
-    const rl = rateLimiter({ surface, key });
-    if (!rl.allowed) {
-        const e = new Error(`RATE_LIMITED: retryAfter=${rl.retryAfter}`);
-        e.code = "RATE_LIMITED";
-        e.meta = { retryAfter: rl.retryAfter, surface, traceId };
-        throw e;
+  const rl = rateLimiter({ surface, key });
+  if (!rl.allowed) {
+    const e = new Error(`RATE_LIMITED: retryAfter=${rl.retryAfter}`);
+    e.code = "RATE_LIMITED";
+    e.meta = { retryAfter: rl.retryAfter, surface, traceId };
+    throw e;
+  }
+}
+
+// ============================================================================
+// VALIDATION: FISCAL CONFIG
+// ============================================================================
+
+export async function validateFiscalConfig(traceId = "init") {
+  const key = await getSecret(SECRETS.FISCAL_KEY).catch(() => "");
+  const nif = await getSecret(SECRETS.FISCAL_NIF_EMISOR).catch(() => "");
+  if (!key || key.length < 32) {
+    log.error("CONFIGURACION_FISCAL_INVALIDA: Clave fiscal ausente o demasiado corta", { traceId });
+    throw new Error("CONFIGURACION_FISCAL_INVALIDA");
+  }
+  if (!nif || nif.length < 9) {
+    log.error("CONFIGURACION_FISCAL_INVALIDA: NIF emisor ausente o invalido", { traceId });
+    throw new Error("CONFIGURACION_FISCAL_INVALIDA");
+  }
+  return true;
+}
+
+async function _getFiscalKeys(traceId) {
+  const [key, nif] = await Promise.all([
+    getSecret(SECRETS.FISCAL_KEY).catch(() => ""),
+    getSecret(SECRETS.FISCAL_NIF_EMISOR).catch(() => ""),
+  ]);
+  if (!key || !nif) {
+    throw new Error("CONFIGURACION_FISCAL_INVALIDA");
+  }
+  return { fiscalKey: key, businessTaxId: _safeTrim(nif).toUpperCase() };
+}
+
+// ============================================================================
+// RETRY WITH EXPONENTIAL BACKOFF
+// ============================================================================
+
+export async function executeLedgerWithBackoff(operationFn, maxWallTimeMs = 15000) {
+  const start = Date.now();
+  let attempt = 0;
+  let lastErr;
+  while (Date.now() - start < maxWallTimeMs && attempt < 5) {
+    try {
+      return await operationFn();
+    } catch (err) {
+      lastErr = err;
+      attempt++;
+      const wait = Math.min(200 * Math.pow(2, attempt), 2000) + Math.random() * 100;
+      await new Promise((r) => setTimeout(r, wait));
     }
+  }
+  throw new Error(`LEDGER_TIMEOUT: Operacion supero el tiempo limite de ${maxWallTimeMs}ms (${lastErr?.message})`);
 }
 
-async function _getCachedCashierSecret() {
-    const now = Date.now();
-    if (cachedFiscalKey && now - cacheKeyTime < FISCAL_KEY_CACHE_TTL_MS) return cachedFiscalKey;
+// ============================================================================
+// HASH CHAIN UTILITIES
+// [R2-04] Todas las funciones de hash son async
+// ============================================================================
 
-    const key = await getSecret(SECRETS.FISCAL_KEY).catch(() => "");
-    if (!key) throw createBookingError(ERROR_CODES.FISCAL_SIGN_FAIL, "FISCAL_KEY secret missing in Secrets Manager");
-
-    cachedFiscalKey = key;
-    cacheKeyTime = now;
-    return cachedFiscalKey;
+function _buildLedgerPayload(mov) {
+  return _stableSerialize({
+    previousRecordHash: mov.previousRecordHash || GENESIS_HASH,
+    sequenceNumber: mov.sequenceNumber || 0,
+    invoiceNumber: mov.invoiceNumber || "",
+    operationDate: mov.operationDate || "",
+    movementType: mov.movementType || "",
+    paymentMethod: mov.paymentMethod || "",
+    totalAmount: Number(mov.totalAmount) || 0,
+    taxableAmount: Number(mov.taxableAmount) || 0,
+    taxAmount: Number(mov.taxAmount) || 0,
+    taxRate: Number(mov.taxRate) || 0,
+  });
 }
 
-async function _getCachedFiscalIssuerNif() {
-    const now = Date.now();
-    if (cacheNifTime && now - cacheNifTime < FISCAL_KEY_CACHE_TTL_MS) return cachedFiscalNif;
-
-    const raw = await getSecret(SECRETS.FISCAL_NIF_EMISOR).catch(() => "");
-    const normalized = String(raw || "").trim().toUpperCase();
-    cachedFiscalNif = /^[A-Z0-9]{8,12}$/.test(normalized) ? normalized : null;
-    cacheNifTime = now;
-    return cachedFiscalNif;
+async function _computeCurrentHash(prevHash, payloadStr) {
+  return await hashChain(prevHash, payloadStr);
 }
 
-function _canonicalPayload(prevHash, transactionId, tipoMovimiento, importeContable, formaPago) {
-    return `${String(prevHash)}|${String(transactionId)}|${String(tipoMovimiento)}|${Number(importeContable)}|${String(formaPago)}`;
+async function _computeSignature(fiscalKey, currentHash, payloadStr) {
+  const hmac = await hmacSha256Hex(fiscalKey, currentHash);
+  const payloadHash = await hashSHA256(payloadStr);
+  return `${hmac}|${payloadHash}`;
 }
 
-function _canonicalPayloadV2(movement) {
-    return _stableSerialize({
-        prevHash: String(movement?.prevHash || ""),
-        transactionId: String(movement?.transactionId || ""),
-        tipoMovimiento: String(movement?.tipoMovimiento || ""),
-        importeContable: Number(movement?.importeContable || 0),
-        formaPago: String(movement?.formaPago || ""),
-        baseImponible: Number(movement?.baseImponible || 0),
-        cuotaIva: Number(movement?.cuotaIva || 0),
-        tasaIva: Number(movement?.tasaIva || 0),
-        naturalezaOperacion: String(movement?.naturalezaOperacion || ""),
-        tratamientoIva: String(movement?.tratamientoIva || ""),
-        referenciaRectificativa: String(movement?.referenciaRectificativa || ""),
-        detalleLineas: Array.isArray(movement?.detalleLineas) ? movement.detalleLineas : [],
+// ============================================================================
+// SEQUENCE COUNTER (ATOMIC)
+// [R2-01] Mutex distribuido para evitar race condition
+// ============================================================================
+
+async function _getNextSequence(traceId) {
+  const seqCol = COLLECTIONS.SECUENCIA_TICKETS;
+  const lockOwnerId = `seq_${traceId || makeTraceId("seq")}`;
+
+  const lockResult = await _lockSlotKeyOrFail(SEQUENCE_MUTEX_KEY, lockOwnerId, SEQUENCE_MUTEX_TTL_MS);
+  if (!lockResult?.ok) {
+    throw new Error("SEQUENCE_LOCK_BUSY: No se pudo adquirir el lock de secuencia");
+  }
+
+  try {
+    return await executeLedgerWithBackoff(async () => {
+      let seqDoc = await wixData.get(seqCol, "GLOBAL", { suppressAuth: true, consistentRead: true }).catch(() => null);
+      if (!seqDoc) {
+        seqDoc = {
+          _id: "GLOBAL",
+          sequenceCounters: { seqGlobal: 0 },
+          _createdDate: new Date(),
+          _updatedDate: new Date(),
+        };
+        await wixData.insert(seqCol, seqDoc, { suppressAuth: true });
+      }
+      const counters = seqDoc.sequenceCounters || {};
+      const nextGlobal = Number(counters.seqGlobal || 0) + 1;
+      const yearKey = String(new Date().getFullYear());
+      const nextYear = Number(counters[yearKey] || 0) + 1;
+      counters.seqGlobal = nextGlobal;
+      counters[yearKey] = nextYear;
+      seqDoc.sequenceCounters = counters;
+      seqDoc._updatedDate = new Date();
+      await wixData.update(seqCol, seqDoc, { suppressAuth: true });
+      return {
+        sequenceNumber: nextGlobal,
+        yearSequence: nextYear,
+        invoiceNumber: `FAC-${yearKey}-${String(nextYear).padStart(5, "0")}`,
+      };
     });
+  } finally {
+    await _unlockSlotKey(SEQUENCE_MUTEX_KEY, lockOwnerId).catch(() => {});
+  }
 }
 
-async function _getNextSequenceNumbers(year, traceId) {
-    const SEQ_COLLECTION = COLLECTIONS.CONTADORES_FISCALES;
-    const SEQ_ID = "GLOBAL";
-    const lockOwnerId = `${String(traceId || "seq")}_${Date.now()}`;
+// ============================================================================
+// GET LAST MOVEMENT (FOR HASH CHAIN)
+// [R2-03] Ordenar por sequenceNumber (determinista, no registeredAt)
+// ============================================================================
 
-    const lockResult = await _lockSlotKeyOrFail(
-        FISCAL_SEQUENCE_MUTEX_KEY,
-        lockOwnerId,
-        FISCAL_SEQUENCE_MUTEX_TTL_MS
-    );
-    if (!lockResult?.ok) {
-        throw createBookingError(
-            ERROR_CODES.TOKEN_BUSY,
-            "Fiscal sequence generation busy, retry later",
-            { traceId }
-        );
-    }
-
-    try {
-        return await _executeWithRetry(async () => {
-            let seqDoc = await withTimeout(
-                wixData.get(SEQ_COLLECTION, SEQ_ID, { suppressAuth: true, consistentRead: true }).catch(() => null),
-                CMS_TIMEOUT_MS,
-                "getTicketSequence"
-            );
-
-            if (!seqDoc) {
-                try {
-                    seqDoc = await withTimeout(
-                        wixData.insert(SEQ_COLLECTION, { _id: SEQ_ID, data: {} }, { suppressAuth: true }),
-                        CMS_TIMEOUT_MS,
-                        "createTicketSequence"
-                    );
-                } catch (insertErr) {
-                    seqDoc = await withTimeout(
-                        wixData.get(SEQ_COLLECTION, SEQ_ID, { suppressAuth: true, consistentRead: true }),
-                        CMS_TIMEOUT_MS,
-                        "regetTicketSequenceAfterRace"
-                    );
-                }
-            }
-
-            const keyYear = String(year);
-            const seqData = seqDoc && typeof seqDoc.data === "object" && seqDoc.data ? seqDoc.data : {};
-
-            const currentYearSeq = Number(seqData[keyYear] || 0);
-            const nextYearSeq = currentYearSeq + 1;
-
-            const currentGlobalSeq = Number(seqData.seqGlobal || 0);
-            const nextGlobalSeq = currentGlobalSeq + 1;
-
-            const { _createdDate, _updatedDate, _owner, ...safeSeqDoc } = seqDoc;
-
-            const updated = {
-                ...safeSeqDoc,
-                _id: SEQ_ID,
-                data: { ...seqData, [keyYear]: nextYearSeq, seqGlobal: nextGlobalSeq },
-            };
-
-            const saved = await withTimeout(
-                wixData.save(SEQ_COLLECTION, updated, { suppressAuth: true }),
-                CMS_TIMEOUT_MS,
-                "saveTicketSequence"
-            );
-
-            const savedData = saved && typeof saved.data === "object" && saved.data ? saved.data : {};
-            if (Number(savedData[keyYear]) !== nextYearSeq || Number(savedData.seqGlobal) !== nextGlobalSeq) {
-                throw createBookingError(ERROR_CODES.FISCAL_SIGN_FAIL, "Sequence persistence mismatch", {
-                    traceId,
-                    expectedYear: nextYearSeq,
-                    expectedGlobal: nextGlobalSeq,
-                });
-            }
-
-            return { nextYearSeq, nextGlobalSeq };
-        }, 5, 250);
-    } finally {
-        await _unlockSlotKey(FISCAL_SEQUENCE_MUTEX_KEY, lockOwnerId).catch(() => {});
-    }
+async function _getLastMovement(traceId) {
+  const res = await wixData
+    .query(COLLECTIONS.MOVIMIENTOS_CAJA)
+    .descending("sequenceNumber")
+    .limit(1)
+    .find({ suppressAuth: true, consistentRead: true });
+  return res?.items?.[0] || null;
 }
 
-async function _getUltimoHashYSecuencia() {
-    const res = await withTimeout(
-        wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
-            .descending("seqGlobal")
-            .limit(1)
-            .find({ suppressAuth: true, consistentRead: true }),
-        CMS_TIMEOUT_MS,
-        "_getUltimoHashYSecuencia"
-    );
+// ============================================================================
+// CHECK PERIOD CLOSED
+// [R2-15] Bloqueo de periodo cerrado
+// ============================================================================
 
-    if (!res.items || res.items.length === 0) {
-        return { ultimoHash: SEED_SIGNATURE, ultimoSeqGlobal: 0 };
-    }
+async function _assertPeriodNotClosed(operationDate, traceId) {
+  const existingZ = await wixData.get(
+    COLLECTIONS.HISTORICO_CIERRES_Z,
+    `Z_${operationDate}`,
+    { suppressAuth: true }
+  ).catch(() => null);
 
-    const last = res.items[0];
-    return {
-        ultimoHash: last.hashCadena || SEED_SIGNATURE,
-        ultimoSeqGlobal: Number(last.seqGlobal || 0),
-    };
+  if (existingZ) {
+    log.error("PERIOD_CLOSED: Intento de insertar movimiento en periodo cerrado", {
+      operationDate,
+      traceId,
+    });
+    throw new Error("PERIOD_CLOSED: No se pueden insertar movimientos en un periodo con cierre Z");
+  }
 }
 
-async function _getAllDailyMovements(diaKey, options = {}) {
-    if (!diaKey) return [];
-
-    let allItems = [];
-    let query = wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA).eq("diaKey", String(diaKey));
-
-    if (options.formaPago) query = query.eq("formaPago", options.formaPago);
-    if (options.ascendingCreated) query = query.ascending("seqGlobal");
-
-    query = query.limit(1000);
-
-    let res = await withTimeout(
-        query.find({ suppressAuth: true, consistentRead: true }),
-        CMS_TIMEOUT_MS,
-        "queryDailyMovements_p1"
-    );
-    allItems = allItems.concat(res.items || []);
-
-    let page = 2;
-    const maxPages = Number(SDK_CONFIG?.JOBS?.FISCAL_DAILY_MAX_PAGES) || 10;
-
-    while (res.hasNext() && page <= maxPages) {
-        res = await withTimeout(
-            res.next({ suppressAuth: true, consistentRead: true }),
-            CMS_TIMEOUT_MS,
-            `queryDailyMovements_p${page}`
-        );
-        allItems = allItems.concat(res.items || []);
-        page++;
-    }
-
-    if (res.hasNext()) {
-        throw createBookingError(ERROR_CODES.FISCAL_SIGN_FAIL, "Daily fiscal movement query reached configured page cap", {
-            diaKey: String(diaKey),
-            maxPages,
-            itemCount: allItems.length,
-        });
-    }
-
-    return allItems;
-}
-
-function _buildCashierProjection(items) {
-    const totals = {
-        saldoEfectivo: 0,
-        saldoTarjeta: 0,
-        saldoBizum: 0,
-        saldoOnline: 0,
-    };
-
-    for (const movement of items || []) {
-        const amount = Number(movement?.importeContable) || 0;
-        if (movement?.formaPago === FORMA_PAGO.EFECTIVO) totals.saldoEfectivo += amount;
-        if (movement?.formaPago === FORMA_PAGO.TARJETA) totals.saldoTarjeta += amount;
-        if (movement?.formaPago === FORMA_PAGO.BIZUM) totals.saldoBizum += amount;
-        if (movement?.formaPago === FORMA_PAGO.ONLINE) totals.saldoOnline += amount;
-    }
-
-    return {
-        saldoEfectivo: _roundMoney(totals.saldoEfectivo),
-        saldoTarjeta: _roundMoney(totals.saldoTarjeta),
-        saldoBizum: _roundMoney(totals.saldoBizum),
-        saldoOnline: _roundMoney(totals.saldoOnline),
-        saldoTotal: _roundMoney(totals.saldoEfectivo + totals.saldoTarjeta + totals.saldoBizum + totals.saldoOnline),
-        totalOperaciones: Array.isArray(items) ? items.length : 0,
-    };
-}
-
-function _isClosedCajaState(estado) {
-    const norm = String(estado || "").trim().toUpperCase();
-    return norm === "CERRADA" || norm === "CLOSED";
-}
-
-async function _upsertCurrentCashProjection(diaKey, options = {}) {
-    const day = String(diaKey || "").trim();
-    if (!day) return null;
-
-    return await _executeWithRetry(async () => {
-        const now = new Date();
-        const [items, current] = await Promise.all([
-            _getAllDailyMovements(day),
-            withTimeout(
-                wixData.get(COLLECTIONS.CAJA_ACTUAL, "CAJA_PRINCIPAL", { suppressAuth: true, consistentRead: true }).catch(() => null),
-                CMS_TIMEOUT_MS,
-                "getCurrentCashProjection"
-            ),
-        ]);
-        const projection = _buildCashierProjection(items);
-        const isSameDay = String(current?.diaKey || "") === day;
-        const keepClosed = isSameDay && _isClosedCajaState(current?.estado) && !options.closed;
-        const { _createdDate, _updatedDate, _owner, ...safeCurrent } = current || {};
-        const doc = {
-            ...safeCurrent,
-            _id: "CAJA_PRINCIPAL",
-            diaKey: day,
-            ...projection,
-            estado: (options.closed || keepClosed) ? CAJA_STATUS.CLOSED : CAJA_STATUS.OPEN,
-            fechaApertura: isSameDay && current?.fechaApertura ? current.fechaApertura : now,
-            fechaCierre: options.closed ? now : (keepClosed ? current?.fechaCierre || null : null),
-            ultimaActualizacion: now,
-            fechaActualizacion: now,
-        };
-
-        const operation = current ?
-            wixData.update(COLLECTIONS.CAJA_ACTUAL, doc, { suppressAuth: true }) :
-            wixData.insert(COLLECTIONS.CAJA_ACTUAL, doc, { suppressAuth: true });
-
-        return await withTimeout(operation, CMS_TIMEOUT_MS, "upsertCurrentCashProjection");
-    }, 3, 300);
-}
-
-function _mapFormaPagoToTipoMovimiento(formaPagoUpper, isRefund) {
-    if (isRefund) return TIPO_MOVIMIENTO.REEMBOLSO;
-
-    const map = {
-        [FORMA_PAGO.EFECTIVO]: TIPO_MOVIMIENTO.VENTA_EFECTIVO,
-        [FORMA_PAGO.TARJETA]: TIPO_MOVIMIENTO.VENTA_TARJETA,
-        [FORMA_PAGO.BIZUM]: TIPO_MOVIMIENTO.VENTA_BIZUM,
-        [FORMA_PAGO.ONLINE]: TIPO_MOVIMIENTO.VENTA_ONLINE,
-    };
-
-    return map[formaPagoUpper] || "";
-}
-
-function _resolveMovementType(formaPago, amount, requestedType, traceId) {
-    const method = String(formaPago || "").toUpperCase();
-    if (!Object.values(FORMA_PAGO).includes(method)) {
-        throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Unsupported payment method", { traceId });
-    }
-    const requested = String(requestedType || "").trim().toUpperCase();
-    if (requested && !Object.values(TIPO_MOVIMIENTO).includes(requested)) {
-        throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Unsupported movement type", { traceId });
-    }
-
-    const isRefund = Number(amount) < 0 || requested === TIPO_MOVIMIENTO.REEMBOLSO;
-    if (isRefund) {
-        if (requested && requested !== TIPO_MOVIMIENTO.REEMBOLSO) {
-            throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Refund type does not match amount", { traceId });
-        }
-        return TIPO_MOVIMIENTO.REEMBOLSO;
-    }
-
-    const expected = _mapFormaPagoToTipoMovimiento(method, false);
-    if (!expected) throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Unsupported payment method", { traceId });
-    if (!requested || requested === expected) return expected;
-    if (requested === TIPO_MOVIMIENTO.PROPINA && method !== FORMA_PAGO.ONLINE) return requested;
-
-    throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Movement type does not match payment method", { traceId, method, requested, expected });
-}
-
-function _movementNature(tipoMovimiento) {
-    if (tipoMovimiento === TIPO_MOVIMIENTO.PROPINA) return "PROPINA";
-    if (tipoMovimiento === TIPO_MOVIMIENTO.REEMBOLSO) return "DEVOLUCION";
-    if (tipoMovimiento === TIPO_MOVIMIENTO.AJUSTE) return "AJUSTE";
-    return "VENTA";
-}
-
-function _buildDocumentLines(concept, absAmount, baseImponible, cuotaIva, tasaIva) {
-    return [{
-        linea: 1,
-        descripcion: String(concept || "Movimiento de caja").trim().slice(0, 180),
-        cantidad: 1,
-        baseImponible: _roundMoney(baseImponible),
-        cuotaIva: _roundMoney(cuotaIva),
-        tasaIva: Number(tasaIva) || 0,
-        importeTotal: _roundMoney(absAmount),
-    }];
-}
-
-async function _findCitaByBookingId(bookingId) {
-    const clean = String(bookingId || "").trim();
-    if (!clean) return null;
-
-    const q = await withTimeout(
-        wixData
-        .query(COLLECTIONS.CITAS)
-        .eq("bookingId", clean)
-        .limit(1)
-        .find({ suppressAuth: true, consistentRead: true })
-        .catch(() => null),
-        CMS_TIMEOUT_MS,
-        "findCitaByBookingIdInCajas"
-    );
-
-    return q?.items?.[0] || null;
-}
-
-export async function _verifyIntegrityInternal(diaKey, options = {}) {
-    const traceId = options.traceId || makeTraceId("verify-integrity");
-    const fiscalKey = await _getCachedCashierSecret();
-
-    const items = await _getAllDailyMovements(diaKey, { ascendingCreated: true });
-    if (items.length === 0) return { integrityOk: true, inconsistencies: [], totalVerified: 0 };
-
-    const inconsistencies = [];
-    let expectedTicketNum = null;
-    const firstSeqGlobal = Number(items[0]?.seqGlobal || 0);
-    let expectedPrevHash = SEED_SIGNATURE;
-
-    if (firstSeqGlobal > 0) {
-        const predecessor = await withTimeout(
-            wixData
-            .query(COLLECTIONS.MOVIMIENTOS_CAJA)
-            .lt("seqGlobal", firstSeqGlobal)
-            .descending("seqGlobal")
-            .limit(1)
-            .find({ suppressAuth: true, consistentRead: true }),
-            CMS_TIMEOUT_MS,
-            "verifyIntegrityGlobalPredecessor"
-        );
-        expectedPrevHash = predecessor?.items?.[0]?.hashCadena || SEED_SIGNATURE;
-    }
-
-    for (let i = 0; i < items.length; i++) {
-        const m = items[i];
-
-        if (m.prevHash !== expectedPrevHash) {
-            inconsistencies.push({ index: i, id: m._id, reason: "prevHash mismatch with global predecessor hashCadena" });
-        }
-        expectedPrevHash = m.hashCadena || "";
-
-        const payloadCanonico = m.integrityPayloadVersion === "LEDGER_V2" ?
-            _canonicalPayloadV2(m) :
-            _canonicalPayload(m.prevHash, m.transactionId, m.tipoMovimiento, m.importeContable, m.formaPago);
-        const computedHashCadena = hashChain(m.prevHash, payloadCanonico);
-        const computedFirma = hmacSha256Hex(fiscalKey, payloadCanonico);
-        const firmaExpectedFull = `${computedFirma}|${computedHashCadena}`;
-
-        if (m.hashCadena !== computedHashCadena) inconsistencies.push({ index: i, id: m._id, reason: "hashCadena mismatch" });
-        if (m.firmaDigital !== firmaExpectedFull) inconsistencies.push({ index: i, id: m._id, reason: "signature mismatch" });
-
-        if (m.numTicketFactura && typeof m.numTicketFactura === "string") {
-            const parts = m.numTicketFactura.split("-");
-            if (parts.length === 3) {
-                const ticketNum = parseInt(parts[2], 10);
-                if (!isNaN(ticketNum)) {
-                    if (i === 0) expectedTicketNum = ticketNum;
-                    else {
-                        expectedTicketNum++;
-                        if (ticketNum !== expectedTicketNum) {
-                            inconsistencies.push({
-                                index: i,
-                                id: m._id,
-                                reason: `Ticket number sequence mismatch: expected ${expectedTicketNum}, got ${ticketNum}`,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    const integrityOk = inconsistencies.length === 0;
-
-    if (!integrityOk) {
-        log.error("Integrity violation detected", { diaKey, inconsistenciesCount: inconsistencies.length, traceId });
-
-        await withTimeout(
-            wixData
-            .insert(
-                COLLECTIONS.AUDIT_LOG, {
-                    _id: `ALERT_${String(diaKey)}_${Date.now()}`,
-                    tipoEvento: "AUDIT_ALERT_INTEGRITY_VIOLATION",
-                    level: "ERROR",
-                    message: `Integrity violation day ${String(diaKey)}`,
-                    data: { inconsistencies },
-                    traceId,
-                    fechaLog: new Date(),
-                    resourceId: "SYSTEM",
-                    source: "backend/cajas.web.js",
-                }, { suppressAuth: true }
-            )
-            .catch(() => {}),
-            CMS_TIMEOUT_MS,
-            "insertAuditAlertIntegrity"
-        ).catch(() => {});
-    }
-
-    return { integrityOk, inconsistencies, totalVerified: items.length };
-}
-
-export async function registerBookingPayment(bookingId, amount, paymentMethod, options = {}) {
-    const traceId = options.traceId || makeTraceId("ledger");
-    const lockOwnerId = String(traceId);
-
-    try {
-        const cleanAmount = Number(amount);
-        if (!Number.isFinite(cleanAmount) || cleanAmount === 0) {
-            throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Invalid amount", { traceId });
-        }
-
-        const normalizedMethod = String(paymentMethod || FORMA_PAGO.EFECTIVO).toUpperCase();
-
-        if (normalizedMethod === String(FORMA_PAGO.ONLINE).toUpperCase() && !options.transactionId) {
-            throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "ONLINE payments require transactionId", { traceId });
-        }
-
-        await _getCachedCashierSecret();
-
-        const lockResult = await _lockSlotKeyOrFail(LEDGER_MUTEX_KEY, lockOwnerId, LEDGER_MUTEX_TTL_MS);
-        if (!lockResult?.ok) {
-            throw createBookingError(ERROR_CODES.TOKEN_BUSY, "Ledger write busy, retry later", { traceId });
-        }
-
-        try {
-            const { ultimoHash } = await _getUltimoHashYSecuencia();
-
-            const tz = SDK_CONFIG?.TZ || "Europe/Madrid";
-            const madridDateStr = new Date().toLocaleDateString("sv-SE", { timeZone: tz });
-            const year = parseInt(madridDateStr.slice(0, 4), 10) || new Date().getFullYear();
-            const pad = (n) => String(n).padStart(5, "0");
-
-            const tipoMov = _resolveMovementType(normalizedMethod, cleanAmount, options.tipoMovimiento, traceId);
-            const isRefund = tipoMov === TIPO_MOVIMIENTO.REEMBOLSO;
-            const isTip = tipoMov === TIPO_MOVIMIENTO.PROPINA;
-            const signo = isRefund ? -1 : 1;
-
-            const absAmount = Math.abs(cleanAmount);
-            const importeContable = absAmount * signo;
-            const taxRate = isTip ? 0 : IVA_RATES.GENERAL;
-            const baseImponible = isTip ? 0 : Number((absAmount / (1 + taxRate)).toFixed(2)) * signo;
-            const cuotaIva = isTip ? 0 : Number((absAmount - Math.abs(baseImponible)).toFixed(2)) * signo;
-            const naturalezaOperacion = _movementNature(tipoMov);
-            const tratamientoIva = isTip ? "PROPINA_PENDIENTE_GESTORIA" : "IVA_GENERAL";
-
-            const transIdRaw = options.transactionId || `TX_${traceId}_${Date.now()}`;
-            const transId = _normalizeIdPart(transIdRaw, 120);
-            const referenciaRectificativa = isRefund ? _normalizeIdPart(options.refundId || options.orderId || transId, 120) : null;
-            const detalleLineas = _buildDocumentLines(options.concept || `${tipoMov} ${transId}`, absAmount, baseImponible, cuotaIva, taxRate);
-
-            const seqResult = await _getNextSequenceNumbers(year, traceId);
-            const numTicketFactura = `FAC-${year}-${pad(seqResult.nextYearSeq)}`;
-            const seqGlobal = seqResult.nextGlobalSeq;
-
-            const diaKey = options.diaKey || madridDateStr.substring(0, 10);
-            const mesKey = options.mesKey || diaKey.substring(0, 7);
-
-            const fiscalKey = await _getCachedCashierSecret();
-            const nifEmisor = await _getCachedFiscalIssuerNif();
-
-            const payloadCanonico = _canonicalPayloadV2({
-                prevHash: ultimoHash,
-                transactionId: transId,
-                tipoMovimiento: tipoMov,
-                importeContable,
-                formaPago: normalizedMethod,
-                baseImponible,
-                cuotaIva,
-                tasaIva: taxRate,
-                naturalezaOperacion,
-                tratamientoIva,
-                referenciaRectificativa,
-                detalleLineas,
-            });
-            const hashCadena = hashChain(ultimoHash, payloadCanonico);
-            const firma = hmacSha256Hex(fiscalKey, payloadCanonico);
-            const firmaDigital = `${firma}|${hashCadena}`;
-
-            const recordId = `MOV_${_normalizeIdPart(diaKey, 10)}_${_normalizeIdPart(tipoMov, 15)}_${_normalizeIdPart(transId, 120)}`;
-            const resourceId = options.resourceId ? _normalizeIdPart(options.resourceId, 80) : null;
-
-            const checkHash = await _getUltimoHashYSecuencia();
-            if (checkHash.ultimoHash !== ultimoHash) {
-                throw createBookingError(ERROR_CODES.FISCAL_SIGN_FAIL, "Ledger hash changed during mutex hold", {
-                    traceId,
-                    expected: ultimoHash,
-                    actual: checkHash.ultimoHash,
-                });
-            }
-
-            const existing = await withTimeout(
-                wixData.get(COLLECTIONS.MOVIMIENTOS_CAJA, recordId, { suppressAuth: true, consistentRead: true }).catch(() => null),
-                CMS_TIMEOUT_MS,
-                "getExistingRecord"
-            );
-
-            if (existing) {
-                log.info("Ledger idempotent duplicate", { recordId, transactionId: transId, traceId });
-                return { status: "SUCCESS", data: { _id: recordId, idempotent: true }, error: null };
-            }
-
-            const movimiento = {
-                _id: recordId,
-                seqGlobal,
-                tipoMovimiento: tipoMov,
-                concepto: String(options.concept || `${tipoMov} ${transId}`).trim().slice(0, 500),
-                origen: String(options.origen || "INTERNAL").trim().slice(0, 80),
-                orderId: options.orderId ? _normalizeIdPart(options.orderId, 120) : null,
-                refundId: options.refundId ? _normalizeIdPart(options.refundId, 120) : null,
-                importeTotal: absAmount,
-                signo,
-                importeContable,
-                baseImponible,
-                cuotaIva,
-                tasaIva: taxRate,
-                naturalezaOperacion,
-                tratamientoIva,
-                referenciaRectificativa,
-                detalleLineas,
-                integrityPayloadVersion: "LEDGER_V2",
-                nifEmisor,
-                numTicketFactura,
-                prevHash: ultimoHash,
-                hashCadena,
-                firmaDigital,
-                formaPago: normalizedMethod,
-                reservaIdVinculada: bookingId || null,
-                transactionId: transId,
-                resourceId,
-                diaKey,
-                mesKey,
-                traceId: String(traceId),
-                fechaCreacion: new Date(),
-            };
-
-            const result = await withTimeout(
-                wixData.insert(COLLECTIONS.MOVIMIENTOS_CAJA, movimiento, { suppressAuth: true }),
-                CMS_TIMEOUT_MS,
-                "registerBookingPaymentInsert"
-            );
-
-            if (SDK_CONFIG?.ACCOUNTING?.ENABLED === true) {
-                try {
-                    const accounting = await projectLedgerMovementToAccounting(result);
-                    if (accounting?.status === "SKIPPED") {
-                        log.info("Accounting projection intentionally skipped", {
-                            recordId,
-                            reason: accounting.reason,
-                            traceId,
-                        });
-                    }
-                } catch (accountingError) {
-                    log.error("Accounting projection failed after immutable ledger insert", {
-                        recordId,
-                        traceId,
-                        message: accountingError?.message || String(accountingError),
-                    });
-                }
-            }
-
-            try {
-                await _upsertCurrentCashProjection(diaKey, { closed: false });
-            } catch (projectionError) {
-                log.warn("Current cash projection refresh failed after immutable ledger insert", {
-                    recordId,
-                    traceId,
-                    message: projectionError?.message || String(projectionError),
-                });
-            }
-
-            if (!nifEmisor) {
-                log.warn("Ledger entry recorded without configured fiscal issuer NIF", { recordId, traceId });
-            }
-
-            if (SDK_CONFIG?.M365?.ENABLED === true) {
-                try {
-                    await enqueueM365LedgerRecord(result, traceId);
-                } catch (_) {
-                    log.warn("M365 ledger projection enqueue failed", {
-                        recordId,
-                        traceId,
-                        errorCode: "M365_GRAPH_QUEUE_ENQUEUE_FAILED",
-                    });
-                }
-            }
-
-            log.info("Ledger entry recorded", {
-                recordId,
-                numTicketFactura,
-                importeContable,
-                formaPago: normalizedMethod,
-                tipoMov,
-                bookingId,
-                transactionId: transId,
-                traceId,
-            });
-
-            return { status: "SUCCESS", data: result, error: null };
-        } finally {
-            await _unlockSlotKey(LEDGER_MUTEX_KEY, lockOwnerId).catch(() => {});
-        }
-    } catch (error) {
-        const norm = normalizeError(error);
-        log.error("Ledger write failed", { code: norm.code, error: norm.message, traceId });
-        return { status: "ERROR", data: null, error: { code: norm.code || "LEDGER_WRITE_FAIL", message: norm.message || String(error) } };
-    }
-}
-
-function _buildZClosingSummary(diaKey, movements, integrity, source) {
-    const items = [...(movements || [])].sort((a, b) => Number(a?.seqGlobal || 0) - Number(b?.seqGlobal || 0));
-    const totalsByPayment = { efectivo: 0, tarjeta: 0, bizum: 0, online: 0 };
-    const totalsByMovement = {};
-    const totalsByVatRate = {};
-    let totalVentas = 0;
-    let totalReembolsos = 0;
-    let totalPropinas = 0;
-    let totalAjustes = 0;
-    let baseImponibleNeta = 0;
-    let cuotaIvaNeta = 0;
-
-    for (const movement of items) {
-        const amount = Number(movement?.importeContable) || 0;
-        const base = Number(movement?.baseImponible) || 0;
-        const vat = Number(movement?.cuotaIva) || 0;
-        const payment = String(movement?.formaPago || "").toLowerCase();
-        const type = String(movement?.tipoMovimiento || "AJUSTE").toUpperCase();
-        const vatRate = String(Number(movement?.tasaIva) || 0);
-
-        if (Object.prototype.hasOwnProperty.call(totalsByPayment, payment)) totalsByPayment[payment] += amount;
-        totalsByMovement[type] = _roundMoney((totalsByMovement[type] || 0) + amount);
-        if (!totalsByVatRate[vatRate]) totalsByVatRate[vatRate] = { baseImponible: 0, cuotaIva: 0, total: 0, operaciones: 0 };
-        totalsByVatRate[vatRate].baseImponible = _roundMoney(totalsByVatRate[vatRate].baseImponible + base);
-        totalsByVatRate[vatRate].cuotaIva = _roundMoney(totalsByVatRate[vatRate].cuotaIva + vat);
-        totalsByVatRate[vatRate].total = _roundMoney(totalsByVatRate[vatRate].total + amount);
-        totalsByVatRate[vatRate].operaciones++;
-        baseImponibleNeta += base;
-        cuotaIvaNeta += vat;
-        if (type === TIPO_MOVIMIENTO.REEMBOLSO || amount < 0) totalReembolsos += amount;
-        else if (type === TIPO_MOVIMIENTO.PROPINA) totalPropinas += amount;
-        else if (type === TIPO_MOVIMIENTO.AJUSTE) totalAjustes += amount;
-        else totalVentas += amount;
-    }
-
-    const first = items[0] || null;
-    const last = items[items.length - 1] || null;
-    const payload = {
-        version: "Z_V2",
-        diaKey: String(diaKey),
-        timezone: SDK_CONFIG?.TZ || "Europe/Madrid",
-        source,
-        seqInicio: Number(first?.seqGlobal || 0),
-        seqFin: Number(last?.seqGlobal || 0),
-        hashInicio: String(first?.prevHash || SEED_SIGNATURE),
-        hashFin: String(last?.hashCadena || SEED_SIGNATURE),
-        ticketInicio: String(first?.numTicketFactura || ""),
-        ticketFin: String(last?.numTicketFactura || ""),
-        totalEfectivo: _roundMoney(totalsByPayment.efectivo),
-        totalTarjeta: _roundMoney(totalsByPayment.tarjeta),
-        totalBizum: _roundMoney(totalsByPayment.bizum),
-        totalOnline: _roundMoney(totalsByPayment.online),
-        totalVentas: _roundMoney(totalVentas),
-        totalReembolsos: _roundMoney(totalReembolsos),
-        totalPropinas: _roundMoney(totalPropinas),
-        totalAjustes: _roundMoney(totalAjustes),
-        baseImponibleNeta: _roundMoney(baseImponibleNeta),
-        cuotaIvaNeta: _roundMoney(cuotaIvaNeta),
-        resumenTiposMovimiento: totalsByMovement,
-        resumenTipoIva: totalsByVatRate,
-        numOperaciones: items.length,
-        integridadVerificada: Boolean(integrity?.integrityOk),
-        totalRegistrosVerificados: Number(integrity?.totalVerified || 0),
-    };
-
-    return payload;
-}
-
-export async function _registerZClosingInternal(diaKey, options = {}) {
-    const traceId = options.traceId || makeTraceId("z-closing-cron");
-    try {
-        if (!diaKey) throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "diaKey required", { traceId });
-        const zId = `Z_${String(diaKey)}`;
-        const existingZ = await withTimeout(
-            wixData.query(COLLECTIONS.HISTORICO_CIERRES_Z).eq("_id", zId).limit(1).find({ suppressAuth: true, consistentRead: true }),
-            CMS_TIMEOUT_MS,
-            "checkExistingZInternal"
-        );
-        if (existingZ?.items?.length) {
-            return { status: "SUCCESS", data: { ...existingZ.items[0], idempotent: true }, error: null };
-        }
-        const integrity = await _verifyIntegrityInternal(diaKey, { traceId });
-        if (!integrity?.integrityOk) {
-            throw createBookingError(ERROR_CODES.FISCAL_VIOLATION, "Integrity violation in Z closing", { traceId });
-        }
-        const items = await _getAllDailyMovements(diaKey, { ascendingCreated: true });
-        const source = options.autoCron ? "CRON" : "ADMIN";
-        const summary = _buildZClosingSummary(diaKey, items, integrity, source);
-        const fiscalKey = await _getCachedCashierSecret();
-        const hashCierre = hashChain(summary.hashFin, JSON.stringify(summary));
-        const firmaCierre = hmacSha256Hex(fiscalKey, hashCierre);
-        const record = {
-            _id: zId,
-            diaKey: String(diaKey),
-            ...summary,
-            totalGeneral: _roundMoney(summary.totalEfectivo + summary.totalTarjeta + summary.totalBizum + summary.totalOnline),
-            estado: CAJA_STATUS.CLOSED,
-            fechaCierre: new Date(),
-            fechaVerificacion: new Date(),
-            hashCierre,
-            firmaCierre,
-            traceId,
-        };
-        const result = await withTimeout(
-            wixData.insert(COLLECTIONS.HISTORICO_CIERRES_Z, record, { suppressAuth: true }),
-            CMS_TIMEOUT_MS,
-            "insertZClosingInternal"
-        );
-        await _upsertCurrentCashProjection(diaKey, { closed: true });
-        return { status: "SUCCESS", data: result, error: null };
-    } catch (error) {
-        return { status: "ERROR", data: null, error: _toPublicError(error, "Z_CLOSING_FAIL") };
-    }
-}
-
-const FISCAL_RECOVERY_KIND = "FISCAL_LEDGER";
-const FISCAL_RECOVERY_MAX_RETRIES = Number(CONCURRENCY?.MAX_COMPENSATION_RETRIES) || 3;
-
-async function _markCitasPaidAfterFiscalRecovery(bookingIds, orderId, traceId) {
-    const ids = String(bookingIds || "").split(",").map((id) => id.trim()).filter(Boolean);
-    for (const bookingId of ids) {
-        try {
-            const res = await withTimeout(
-                wixData.query(COLLECTIONS.CITAS).eq("bookingId", bookingId).limit(1).find({ suppressAuth: true, consistentRead: true }),
-                CMS_TIMEOUT_MS,
-                "recoveryQueryCita"
-            );
-            const cita = res?.items?.[0];
-            if (!cita) continue;
-            const meta = cita.meta || {};
-            const paymentState = String(meta[CITA_FIELDS.STATUS_PAGO] || cita[CITA_FIELDS.STATUS_PAGO] || "").toUpperCase();
-            if (paymentState === ESTADO_PAGO.REFUNDED || paymentState === ESTADO_PAGO.PARTIALLY_REFUNDED) continue;
-
-            const { _createdDate, _updatedDate, _owner, ...safeCita } = cita;
-            await withTimeout(
-                wixData.update(COLLECTIONS.CITAS, {
-                    ...safeCita,
-                    [CITA_FIELDS.STATUS]: ESTADO_CITA.CONFIRMED,
-                    [CITA_FIELDS.STATUS_PAGO]: ESTADO_PAGO.PAID,
-                    fechaActualizacion: new Date(),
-                    meta: {
-                        ...meta,
-                        [CITA_FIELDS.STATUS_PAGO]: ESTADO_PAGO.PAID,
-                        orderId: orderId || meta.orderId || null,
-                        fechaRegistroFiscal: new Date(),
-                    },
-                }, { suppressAuth: true }),
-                CMS_TIMEOUT_MS,
-                "recoveryUpdateCitaPaid"
-            );
-        } catch (error) {
-            log.error("Fiscal recovery could not finalize CitasF2 payment state", { bookingId, traceId, message: error?.message });
-        }
-    }
-}
-
-export async function queueFiscalRecovery(payload = {}) {
-    const transactionId = _normalizeIdPart(payload.transactionId, 120);
-    const bookingIds = String(payload.bookingIds || "").trim();
-    const amount = Number(payload.amount);
-    const paymentMethod = String(payload.paymentMethod || FORMA_PAGO.ONLINE).toUpperCase();
-    const traceId = String(payload.traceId || makeTraceId("fiscal-recovery"));
-
-    if (!transactionId || !Number.isFinite(amount) || amount === 0) {
-        throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Invalid fiscal recovery payload", { traceId });
-    }
-
-    const recordId = `FISCAL_${transactionId}`;
-    const existing = await wixData
-        .get(COLLECTIONS.COMPENSATIONS, recordId, { suppressAuth: true, consistentRead: true })
-        .catch(() => null);
-
-    const now = new Date();
-    const document = {
-        ...(existing || {}),
-        _id: recordId,
-        kind: FISCAL_RECOVERY_KIND,
-        status: "PENDING",
-        attempts: Number(existing?.attempts || 0),
-        bookingIds,
-        amount,
-        paymentMethod,
-        transactionId,
-        orderId: String(payload.orderId || existing?.orderId || ""),
-        refundId: String(payload.refundId || existing?.refundId || ""),
-        origin: String(payload.origin || existing?.origin || "FISCAL_RECOVERY"),
-        concept: String(payload.concept || "Fiscal ledger recovery"),
-        resourceId: String(payload.resourceId || "online"),
-        tipoMovimiento: String(payload.tipoMovimiento || TIPO_MOVIMIENTO.VENTA_ONLINE),
-        phase: String(payload.phase || existing?.phase || ""),
+// ============================================================================
+// AUDIT LOG HELPER
+// [R2-20] Funcion auxiliar para auditoria
+// ============================================================================
+
+async function _logAuditEvent(tipoEvento, level, message, data = {}, traceId, entityId = "system") {
+  try {
+    const safeEntity = _normalizeIdPart(entityId, 40);
+    const safeTrace = _normalizeIdPart(traceId, 40);
+    const logId = `AUDIT_${_normalizeIdPart(tipoEvento, 30)}_${safeEntity}_${safeTrace}`;
+    await wixData.insert(
+      COLLECTIONS.MM_AUDIT_LOG,
+      {
+        _id: logId,
+        eventType: tipoEvento,
+        level,
+        message,
+        data,
+        resourceId: "SYSTEM",
+        source: "backend/cajas.web.js",
+        loggedAt: new Date(),
         traceId,
-        lastError: String(payload.lastError || existing?.lastError || ""),
-        createdAt: existing?.createdAt || now,
-        updatedAt: now,
-    };
-
-    if (existing) {
-        await wixData.update(COLLECTIONS.COMPENSATIONS, document, { suppressAuth: true });
-    } else {
-        try {
-            await wixData.insert(COLLECTIONS.COMPENSATIONS, document, { suppressAuth: true });
-        } catch (error) {
-            if (String(error?.message || "").includes("WDE0123") || String(error?.message || "").includes("WD_ITEM_ALREADY_EXISTS")) {
-                return { status: "SUCCESS", data: { _id: recordId, idempotent: true }, error: null };
-            }
-            throw error;
-        }
-    }
-
-    return { status: "SUCCESS", data: { _id: recordId, idempotent: !!existing }, error: null };
+      },
+      { suppressAuth: true }
+    ).catch(() => null);
+  } catch (err) {
+    log.error("Failed to write to AUDIT_LOG", { error: err?.message || String(err), traceId });
+  }
 }
 
-export async function processPendingFiscalRecoveries(options = {}) {
-    const traceId = String(options.traceId || makeTraceId("fiscal-recovery-cron"));
-    const limit = Math.max(1, Math.min(Number(options.limit) || 25, 100));
-    const result = await wixData
-        .query(COLLECTIONS.COMPENSATIONS)
-        .eq("kind", FISCAL_RECOVERY_KIND)
-        .eq("status", "PENDING")
-        .ascending("createdAt")
-        .limit(limit)
+// ============================================================================
+// CORE: REGISTER MANUAL TRANSACTION
+// [R2-02] Idempotencia por transactionId
+// [R2-15] Bloqueo de periodo cerrado
+// ============================================================================
+
+export const registerManualTransaction = webMethod(Permissions.SiteMember, async (payload) => {
+  const traceId = payload?.traceId || makeTraceId("manual-tx");
+  try {
+    await requireCajero(traceId);
+    await validateFiscalConfig(traceId);
+    const { fiscalKey, businessTaxId } = await _getFiscalKeys(traceId);
+
+    const amount = _readPositiveAmount(payload?.amount);
+    if (!amount) {
+      return { status: "ERROR", data: null, error: { code: "INVALID_AMOUNT", message: "Importe positivo requerido" } };
+    }
+
+    const paymentMethod = _safeTrim(payload?.paymentMethod).toUpperCase();
+    if (!Object.values(FORMA_PAGO).includes(paymentMethod)) {
+      return { status: "ERROR", data: null, error: { code: "INVALID_PAYMENT_METHOD", message: "Forma de pago invalida" } };
+    }
+
+    const movementType = _safeTrim(payload?.tipoMovimiento || payload?.movementType || "VENTA").toUpperCase();
+    const concept = _cleanText(payload?.concept || payload?.description || "Venta mostrador", 500);
+    const resourceId = _safeTrim(payload?.resourceId || "CAJA_LOCAL");
+    const transactionId = payload?.transactionId || null;
+
+    // [R2-02] Idempotencia: verificar si ya existe este transactionId
+    if (transactionId) {
+      const existingRes = await wixData
+        .query(COLLECTIONS.MOVIMIENTOS_CAJA)
+        .eq("transactionId", transactionId)
+        .limit(1)
         .find({ suppressAuth: true, consistentRead: true });
 
-    let completed = 0;
-    let failed = 0;
-    for (const item of result?.items || []) {
-        const waitForOriginal = String(item.phase || "") === "WAIT_FOR_ORIGINAL_ORDER_LEDGER";
-        if (waitForOriginal) {
-            const originalTransactionId = `ORDER-${String(item.orderId || "").trim()}`;
-            const original = await wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA).eq("transactionId", originalTransactionId).limit(1).find({ suppressAuth: true, consistentRead: true }).catch(() => ({ items: [] }));
-            if (!original?.items?.length) continue;
-        }
-
-        const attempt = Number(item.attempts || 0) + 1;
-        const ledger = await registerBookingPayment(item.bookingIds || null, item.amount, item.paymentMethod, {
-            concept: item.concept,
-            resourceId: item.resourceId,
-            traceId: item.traceId || traceId,
-            transactionId: item.transactionId,
-            orderId: item.orderId || null,
-            refundId: item.refundId || null,
-            origen: item.origin || "FISCAL_RECOVERY",
-            tipoMovimiento: item.tipoMovimiento,
-        });
-
-        const { _createdDate, _updatedDate, _owner, ...safeItem } = item;
-        if (ledger?.status === "SUCCESS") {
-            if (String(item.tipoMovimiento || "").toUpperCase() === TIPO_MOVIMIENTO.VENTA_ONLINE && String(item.bookingIds || "").trim()) {
-                await _markCitasPaidAfterFiscalRecovery(item.bookingIds, item.orderId, item.traceId || traceId);
-            }
-            await wixData.update(COLLECTIONS.COMPENSATIONS, {
-                ...safeItem,
-                status: "COMPLETED",
-                attempts: attempt,
-                completedAt: new Date(),
-                updatedAt: new Date(),
-                lastError: "",
-            }, { suppressAuth: true });
-            completed++;
-            continue;
-        }
-
-        const isTerminalFailure = attempt >= FISCAL_RECOVERY_MAX_RETRIES;
-        const lastError = String(ledger?.error?.message || "FISCAL_RECOVERY_FAILED");
-        await wixData.update(COLLECTIONS.COMPENSATIONS, {
-            ...safeItem,
-            status: isTerminalFailure ? "FAILED" : "PENDING",
-            attempts: attempt,
-            updatedAt: new Date(),
-            lastError,
-            ...(isTerminalFailure ? { alertRequired: true, failedAt: new Date() } : {}),
-        }, { suppressAuth: true });
-        if (isTerminalFailure) {
-            log.error("Fiscal recovery exhausted retries and requires administrator review", { transactionId: item.transactionId, traceId: item.traceId || traceId, lastError });
-        }
-        failed++;
+      if (existingRes?.items?.length > 0) {
+        log.info("Ledger idempotent duplicate detected", { transactionId, traceId });
+        return { status: "SUCCESS", data: existingRes.items[0], error: null, idempotent: true };
+      }
     }
 
-    return { status: "SUCCESS", data: { completed, failed, scanned: result?.items?.length || 0 }, error: null };
+    // Calcular fecha de operacion para verificar periodo
+    const operationDate = new Date().toLocaleDateString("sv-SE", { timeZone: SDK_CONFIG?.TZ || "Europe/Madrid" });
+
+    // [R2-15] Verificar que el periodo no esta cerrado
+    await _assertPeriodNotClosed(operationDate, traceId);
+
+    return await executeLedgerWithBackoff(async () => {
+      // 1. Get sequence (con mutex)
+      const seq = await _getNextSequence(traceId);
+
+      // 2. Get previous hash (ordenado por sequenceNumber)
+      const lastMov = await _getLastMovement(traceId);
+      const previousRecordHash = lastMov?.currentRecordHash || GENESIS_HASH;
+
+      // 3. Calculate tax
+      const taxRate = Number(payload?.taxRate) || IVA_RATES.GENERAL;
+      const taxableAmount = _roundMoney(amount / (1 + taxRate));
+      const taxAmount = _roundMoney(amount - taxableAmount);
+
+      // 4. Build canonical payload
+      const movBase = {
+        sequenceNumber: seq.sequenceNumber,
+        invoiceNumber: seq.invoiceNumber,
+        operationDate,
+        fiscalPeriod: operationDate.slice(0, 7),
+        movementType,
+        operationNature: movementType === TIPO_MOVIMIENTO.REEMBOLSO ? "DEVOLUCION" : movementType === TIPO_MOVIMIENTO.PROPINA ? "PROPINA" : movementType === TIPO_MOVIMIENTO.AJUSTE ? "AJUSTE" : "VENTA",
+        paymentMethod,
+        totalAmount: amount,
+        taxableAmount,
+        taxAmount,
+        taxRate,
+        taxTreatment: movementType === TIPO_MOVIMIENTO.PROPINA ? "PROPINA_PENDIENTE_GESTORIA" : "IVA_GENERAL",
+        accountingSign: movementType === TIPO_MOVIMIENTO.REEMBOLSO ? -1 : 1,
+        accountingAmount: movementType === TIPO_MOVIMIENTO.REEMBOLSO ? -amount : amount,
+        description: concept,
+        lineItems: payload?.lineItems || [],
+        rectifiedInvoiceReference: payload?.rectifiedInvoiceReference || null,
+        businessTaxId,
+        schemaIntegrityVersion: LEDGER_SCHEMA_VERSION,
+        recordSource: payload?.origen || payload?.recordSource || "INTERNAL",
+        resourceId,
+        reservaIdVinculada: _linkedBookingValue(payload?.reservaIdVinculada ?? payload?.reservationIdLinked),
+        transactionId: transactionId || `TX_${seq.sequenceNumber}`,
+        orderId: payload?.orderId || null,
+        refundId: payload?.refundId || null,
+      };
+
+      // 5. Compute hash chain [R2-04] await en funciones async
+      const payloadStr = _buildLedgerPayload(movBase);
+      const currentRecordHash = await _computeCurrentHash(previousRecordHash, payloadStr);
+      const digitalSignature = await _computeSignature(fiscalKey, currentRecordHash, payloadStr);
+
+      // 6. Build final movement record
+      const movimiento = {
+        ...movBase,
+        previousRecordHash,
+        currentRecordHash,
+        digitalSignature,
+        registeredAt: new Date(),
+        traceId,
+        _createdDate: new Date(),
+      };
+
+      // 7. Insert movement
+      const saved = await wixData.insert(COLLECTIONS.MOVIMIENTOS_CAJA, movimiento, { suppressAuth: true });
+
+      // 8. Update CajaActual singleton
+      await _updateCajaActual(movimiento, traceId);
+
+      // 9. Register system event (Veri*factu) [R2-04] await
+      await _registerSystemEvent(saved, traceId);
+
+      // 10. Project to accounting (if enabled) [R2-20] Auditoria de fallos
+      if (SDK_CONFIG?.ACCOUNTING?.ENABLED) {
+        try {
+          await _projectToAccounting(saved, traceId);
+        } catch (e) {
+          log.error("Accounting projection failed (non-blocking)", { traceId, error: e?.message });
+          await _logAuditEvent("ACCOUNTING_PROJECTION_FAILED", "ERROR", `Proyeccion contable fallida para ${saved.invoiceNumber}`, { invoiceNumber: saved.invoiceNumber, error: e?.message, traceId }, traceId);
+        }
+      }
+
+      // 11. Enqueue M365 sync (if enabled) [R2-20] Auditoria de fallos
+      if (SDK_CONFIG?.M365?.ENABLED) {
+        try {
+          await _enqueueM365Sync(saved, traceId);
+        } catch (e) {
+          log.error("M365 sync enqueue failed (non-blocking)", { traceId, error: e?.message });
+          await _logAuditEvent("M365_SYNC_ENQUEUE_FAILED", "ERROR", `Encolado M365 fallido para ${saved.invoiceNumber}`, { invoiceNumber: saved.invoiceNumber, error: e?.message, traceId }, traceId);
+        }
+      }
+
+      return { status: "SUCCESS", data: saved, error: null };
+    });
+  } catch (err) {
+    const norm = normalizeError(err);
+    log.error("registerManualTransaction failed", { code: norm.code, error: norm.message, traceId });
+    return { status: "ERROR", data: null, error: { code: norm.code || "LEDGER_FAIL", message: norm.message } };
+  }
+});
+
+// ============================================================================
+// UPDATE CAJA ACTUAL SINGLETON
+// ============================================================================
+
+async function _updateCajaActual(movimiento, traceId) {
+  try {
+    const cajaCol = COLLECTIONS.CAJA_ACTUAL;
+    let caja = await wixData.get(cajaCol, CAJA_ACTUAL_ID, { suppressAuth: true }).catch(() => null);
+    if (!caja) {
+      caja = {
+        _id: CAJA_ACTUAL_ID,
+        operationDate: movimiento.operationDate,
+        cashRegisterStatus: CAJA_STATUS.OPEN,
+        totalBalance: 0,
+        cashBalance: 0,
+        cardBalance: 0,
+        bizumBalance: 0,
+        onlineBalance: 0,
+        totalOperations: 0,
+        openedAt: new Date(),
+        closedAt: null,
+        lastActivityAt: new Date(),
+        _createdDate: new Date(),
+        _updatedDate: new Date(),
+      };
+    }
+    const amount = Number(movimiento.accountingAmount) || 0;
+    const method = _safeTrim(movimiento.paymentMethod).toUpperCase();
+    if (method === FORMA_PAGO.EFECTIVO) { caja.cashBalance = _roundMoney((caja.cashBalance || 0) + amount); }
+    else if (method === FORMA_PAGO.TARJETA) { caja.cardBalance = _roundMoney((caja.cardBalance || 0) + amount); }
+    else if (method === FORMA_PAGO.BIZUM) { caja.bizumBalance = _roundMoney((caja.bizumBalance || 0) + amount); }
+    else if (method === FORMA_PAGO.ONLINE) { caja.onlineBalance = _roundMoney((caja.onlineBalance || 0) + amount); }
+    caja.totalBalance = _roundMoney((caja.cashBalance || 0) + (caja.cardBalance || 0) + (caja.bizumBalance || 0) + (caja.onlineBalance || 0));
+    caja.totalOperations = Number(caja.totalOperations || 0) + 1;
+    caja.lastActivityAt = new Date();
+    caja._updatedDate = new Date();
+    await wixData.save(cajaCol, caja, { suppressAuth: true });
+  } catch (err) {
+    log.error("_updateCajaActual failed", { traceId, error: err?.message });
+  }
 }
 
-export const registerManualTransaction = webMethod(Permissions.SiteMember, async (payload = {}) => {
-    const traceId = payload.traceId || makeTraceId("manual-tx");
-    try {
-        _rateLimitOrThrow("cajas.registerManualTransaction", "cashier", traceId);
-        await requireCajero(traceId);
+// ============================================================================
+// REGISTER SYSTEM EVENT (Veri*factu)
+// [R2-04] await en hashSHA256
+// ============================================================================
 
-        const { amount, paymentMethod, tipoMovimiento, concept, resourceId = "TPV" } = payload;
-        const normalizedMethod = String(paymentMethod || "").toUpperCase();
-        const requestedType = String(tipoMovimiento || "").toUpperCase();
-        const inferredType = _mapFormaPagoToTipoMovimiento(normalizedMethod, false);
-        if (!inferredType || (requestedType && requestedType !== TIPO_MOVIMIENTO.PROPINA && requestedType !== inferredType)) {
-            throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "Manual movement type does not match payment method", { traceId });
-        }
+async function _registerSystemEvent(movimiento, traceId) {
+  try {
+    const eventCol = COLLECTIONS.EVENTOS_SISTEMA_FACTURACION;
+    const eventHashInput = `${movimiento.invoiceNumber}|${movimiento.currentRecordHash}`;
+    const eventHash = await hashSHA256(eventHashInput);
 
-        const isTip = requestedType === TIPO_MOVIMIENTO.PROPINA;
-        return await registerBookingPayment(null, amount, normalizedMethod, {
-            concept: concept || (isTip ? "Propina TPV" : "Manual TPV"),
-            resourceId,
-            traceId,
-            tipoMovimiento: isTip ? TIPO_MOVIMIENTO.PROPINA : inferredType,
-            transactionId: `MANUAL_${traceId}_${Date.now()}`,
-            origen: isTip ? "ONLY_STAFF_MANUAL_TIP" : "ONLY_STAFF_MANUAL",
+    const eventRecord = {
+      _id: `EV_${movimiento.invoiceNumber}_${Date.now()}`,
+      systemEventId: `EV_${movimiento.invoiceNumber}`,
+      eventDateTime: new Date(),
+      eventType: "LEDGER_MOVEMENT_REGISTERED",
+      severity: "INFO",
+      result: "SUCCESS",
+      eventSource: "backend/cajas.web.js",
+      responsibleUserId: null,
+      responsibleMemberId: null,
+      journalEntryId: null,
+      transactionId: movimiento.transactionId || null,
+      referenceId: movimiento.invoiceNumber,
+      secureDetail: {
+        previousRecordHash: movimiento.previousRecordHash,
+        currentRecordHash: movimiento.currentRecordHash,
+        digitalSignature: movimiento.digitalSignature,
+        schemaIntegrityVersion: movimiento.schemaIntegrityVersion,
+      },
+      previousEventHash: null,
+      eventHash,
+      eventSignature: null,
+      systemVersion: LEDGER_SCHEMA_VERSION,
+      schemaVersion: INTEGRITY_ALGORITHM_VERSION,
+      traceId,
+      _createdDate: new Date(),
+    };
+    await wixData.insert(eventCol, eventRecord, { suppressAuth: true });
+  } catch (err) {
+    log.error("_registerSystemEvent failed", { traceId, error: err?.message });
+  }
+}
+
+// ============================================================================
+// PROJECT TO ACCOUNTING
+// [R2-20] Los errores se auditan en el llamador
+// ============================================================================
+
+async function _projectToAccounting(movimiento, traceId) {
+  const asientosCol = COLLECTIONS.ASIENTOS_CONTABLES;
+  const lineasCol = COLLECTIONS.LINEAS_ASIENTO_CONTABLE;
+  const planCol = COLLECTIONS.PLAN_CUENTAS_CONTABLES;
+
+  const mapRes = await wixData.query(planCol)
+    .eq("operationCategory", movimiento.movementType)
+    .eq("active", true)
+    .limit(1)
+    .find({ suppressAuth: true });
+
+  const map = mapRes?.items?.[0];
+  if (!map) {
+    log.warn("No account map found for movement type", { movementType: movimiento.movementType, traceId });
+    return;
+  }
+
+  const journalEntryId = `ASIENTO_${movimiento.invoiceNumber}`;
+  const totalDebit = Math.abs(Number(movimiento.accountingAmount) || 0);
+  const totalCredit = totalDebit;
+
+  const asiento = {
+    _id: journalEntryId,
+    journalEntryId,
+    sequenceNumber: Number(movimiento.sequenceNumber) || 0,
+    fiscalYear: Number(movimiento.fiscalPeriod?.slice(0, 4)) || new Date().getFullYear(),
+    fiscalPeriod: movimiento.fiscalPeriod || "",
+    operationDate: new Date(movimiento.operationDate),
+    fiscalOperationDate: new Date(movimiento.operationDate),
+    description: movimiento.description || "",
+    totalDebit: _roundMoney(totalDebit),
+    totalCredit: _roundMoney(totalCredit),
+    totalDocumentAmount: _roundMoney(Number(movimiento.totalAmount) || 0),
+    entryType: movimiento.movementType,
+    entryStatus: "CONFIRMADO",
+    operationCategory: movimiento.movementType,
+    currency: "EUR",
+    paymentMethod: movimiento.paymentMethod,
+    wixOrderId: movimiento.orderId || null,
+    wixRefundId: movimiento.refundId || null,
+    wixBookingId: _linkedBookingValue(movimiento.reservaIdVinculada ?? movimiento.reservationIdLinked),
+    transactionId: movimiento.transactionId || null,
+    invoiceNumber: movimiento.invoiceNumber,
+    invoiceIssueDate: new Date(movimiento.operationDate),
+    invoiceType: movimiento.operationNature === "DEVOLUCION" ? "R1" : "F1",
+    recordSource: movimiento.recordSource || "MOVIMIENTO_CAJA",
+    sourceId: movimiento._id || null,
+    schemaVersion: LEDGER_SCHEMA_VERSION,
+    integrityAlgorithmVersion: INTEGRITY_ALGORITHM_VERSION,
+    previousHash: movimiento.previousRecordHash,
+    entryHash: movimiento.currentRecordHash,
+    entrySignature: movimiento.digitalSignature,
+    traceId,
+    registeredAt: new Date(),
+    operationTimeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
+    _createdDate: new Date(),
+  };
+
+  await wixData.insert(asientosCol, asiento, { suppressAuth: true });
+
+  const isRefund = Number(movimiento.accountingSign) === -1;
+  const lines = [];
+  let lineNum = 1;
+
+  if (!isRefund) {
+    lines.push({
+      _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      journalEntryId,
+      lineNumber: lineNum++,
+      accountCode: map.defaultDebitAccountCode || "570000",
+      accountName: map.defaultDebitAccountName || "Caja",
+      debitAmount: _roundMoney(totalDebit),
+      creditAmount: 0,
+      netAmount: _roundMoney(totalDebit),
+      lineDescription: movimiento.description || "",
+      taxableAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+      taxRate: Number(movimiento.taxRate) || 0,
+      taxAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+      traceId,
+      operationDate: new Date(movimiento.operationDate),
+      registeredAt: new Date(),
+      _createdDate: new Date(),
+    });
+
+    lines.push({
+      _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      journalEntryId,
+      lineNumber: lineNum++,
+      accountCode: map.defaultCreditAccountCode || "705000",
+      accountName: map.defaultCreditAccountName || "Prestaciones de servicios",
+      debitAmount: 0,
+      creditAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+      netAmount: -_roundMoney(Number(movimiento.taxableAmount) || 0),
+      lineDescription: movimiento.description || "",
+      taxableAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+      taxRate: Number(movimiento.taxRate) || 0,
+      taxAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+      traceId,
+      operationDate: new Date(movimiento.operationDate),
+      registeredAt: new Date(),
+      _createdDate: new Date(),
+    });
+
+    if (Number(movimiento.taxAmount) > 0) {
+      lines.push({
+        _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+        lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+        journalEntryId,
+        lineNumber: lineNum++,
+        accountCode: map.outputTaxAccountCode || "477000",
+        accountName: map.outputTaxAccountName || "Hacienda Publica IVA Repercutido",
+        debitAmount: 0,
+        creditAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+        netAmount: -_roundMoney(Number(movimiento.taxAmount) || 0),
+        lineDescription: "IVA Repercutido",
+        taxableAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+        taxRate: Number(movimiento.taxRate) || 0,
+        taxAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+        traceId,
+        operationDate: new Date(movimiento.operationDate),
+        registeredAt: new Date(),
+        _createdDate: new Date(),
+      });
+    }
+  } else {
+    lines.push({
+      _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      journalEntryId,
+      lineNumber: lineNum++,
+      accountCode: map.defaultCreditAccountCode || "705000",
+      accountName: map.defaultCreditAccountName || "Prestaciones de servicios",
+      debitAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+      creditAmount: 0,
+      netAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+      lineDescription: movimiento.description || "",
+      taxableAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+      taxRate: Number(movimiento.taxRate) || 0,
+      taxAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+      traceId,
+      operationDate: new Date(movimiento.operationDate),
+      registeredAt: new Date(),
+      _createdDate: new Date(),
+    });
+
+    if (Number(movimiento.taxAmount) > 0) {
+      lines.push({
+        _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+        lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+        journalEntryId,
+        lineNumber: lineNum++,
+        accountCode: map.outputTaxAccountCode || "477000",
+        accountName: map.outputTaxAccountName || "Hacienda Publica IVA Repercutido",
+        debitAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+        creditAmount: 0,
+        netAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+        lineDescription: "IVA Repercutido (devolucion)",
+        taxableAmount: _roundMoney(Number(movimiento.taxableAmount) || 0),
+        taxRate: Number(movimiento.taxRate) || 0,
+        taxAmount: _roundMoney(Number(movimiento.taxAmount) || 0),
+        traceId,
+        operationDate: new Date(movimiento.operationDate),
+        registeredAt: new Date(),
+        _createdDate: new Date(),
+      });
+    }
+
+    lines.push({
+      _id: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      lineHash: `${journalEntryId}_L${String(lineNum).padStart(3, "0")}`,
+      journalEntryId,
+      lineNumber: lineNum++,
+      accountCode: map.defaultDebitAccountCode || "570000",
+      accountName: map.defaultDebitAccountName || "Caja",
+      debitAmount: 0,
+      creditAmount: _roundMoney(totalCredit),
+      netAmount: -_roundMoney(totalCredit),
+      lineDescription: movimiento.description || "",
+      traceId,
+      operationDate: new Date(movimiento.operationDate),
+      registeredAt: new Date(),
+      _createdDate: new Date(),
+    });
+  }
+
+  for (const line of lines) {
+    await wixData.insert(lineasCol, line, { suppressAuth: true });
+  }
+}
+
+// ============================================================================
+// ENQUEUE M365 SYNC
+// [R2-04] await en hashSHA256
+// ============================================================================
+
+async function _enqueueM365Sync(movimiento, traceId) {
+  const queueCol = COLLECTIONS.M365_GRAPH_SYNC_QUEUE;
+  const payload = {
+    eventType: "LEDGER_MOVEMENT",
+    correlationId: traceId,
+    transactionId: movimiento.transactionId,
+    bookingReference: _linkedBookingValue(movimiento.reservaIdVinculada ?? movimiento.reservationIdLinked) || movimiento._id,
+    amount: movimiento.totalAmount,
+    currency: "EUR",
+    occurredAt: movimiento.registeredAt,
+  };
+  payload.title = `LEDGER_MOVEMENT ${movimiento.transactionId || movimiento.invoiceNumber}`;
+  const integrityHash = await hashSHA256(_stableSerialize(payload));
+  payload.integrityHash = integrityHash;
+  const queueId = `m365-graph-${integrityHash.slice(0, 56)}`;
+  const queueRecord = {
+    _id: queueId,
+    payload,
+    payloadHash: integrityHash,
+    status: "PENDING",
+    attempts: 0,
+    nextAttemptAt: new Date(),
+    traceId,
+    _createdDate: new Date(),
+    _updatedDate: new Date(),
+  };
+  await wixData.insert(queueCol, queueRecord, { suppressAuth: true });
+}
+
+// ============================================================================
+// REGISTER BOOKING PAYMENT (called from citasManager / events)
+// ============================================================================
+
+export async function registerBookingPayment(bookingIds, amount, method, meta = {}) {
+  const traceId = meta.traceId || makeTraceId("bkg-pay");
+  return await registerManualTransaction({
+    amount,
+    paymentMethod: method,
+    tipoMovimiento: meta.tipoMovimiento || "VENTA_ONLINE",
+    concept: meta.concept || `Cobro reserva ${bookingIds}`,
+    resourceId: meta.resourceId || "ONLINE",
+    reservaIdVinculada: _linkedBookingValue(bookingIds),
+    transactionId: meta.transactionId || null,
+    orderId: meta.orderId || null,
+    traceId,
+  });
+}
+
+// ============================================================================
+// QUEUE FISCAL RECOVERY
+// ============================================================================
+
+export async function queueFiscalRecovery(recoveryData) {
+  const traceId = recoveryData.traceId || makeTraceId("fiscal-rec");
+  try {
+    const compCol = COLLECTIONS.COMPENSACIONES_PENDIENTES;
+    await wixData.insert(compCol, {
+      _id: `REC_${recoveryData.transactionId || Date.now()}`,
+      bookingIds: recoveryData.bookingIds || null,
+      orderId: recoveryData.orderId || null,
+      refundId: recoveryData.refundId || null,
+      transactionId: recoveryData.transactionId || null,
+      status: "PENDING_RECOVERY",
+      amount: Number(recoveryData.amount) || 0,
+      concept: recoveryData.concept || "Fiscal recovery",
+      paymentMethod: recoveryData.paymentMethod || null,
+      movementType: recoveryData.tipoMovimiento || recoveryData.movementType || null,
+      kind: "FISCAL_LEDGER",
+      phase: recoveryData.phase || null,
+      origin: recoveryData.origin || "FISCAL_RECOVERY",
+      alertRequired: false,
+      attempts: 0,
+      lastError: recoveryData.lastError || null,
+      traceId,
+      _createdDate: new Date(),
+      _updatedDate: new Date(),
+    }, { suppressAuth: true });
+  } catch (err) {
+    log.error("queueFiscalRecovery failed", { traceId, error: err?.message });
+  }
+}
+
+// ============================================================================
+// GET CASHIER STATE
+// ============================================================================
+
+export const getCashierState = webMethod(Permissions.SiteMember, async ({ traceId, diaKey }) => {
+  try {
+    await requireCajero(traceId);
+    const cajaCol = COLLECTIONS.CAJA_ACTUAL;
+    const caja = await wixData.get(cajaCol, CAJA_ACTUAL_ID, { suppressAuth: true }).catch(() => null);
+    return {
+      status: "SUCCESS",
+      data: caja || {
+        _id: CAJA_ACTUAL_ID,
+        cashRegisterStatus: CAJA_STATUS.CLOSED,
+        totalBalance: 0,
+        cashBalance: 0,
+        cardBalance: 0,
+        bizumBalance: 0,
+        onlineBalance: 0,
+        totalOperations: 0,
+      },
+      error: null,
+    };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: _toPublicError(err, "CASHIER_STATE_FAIL") };
+  }
+});
+
+// ============================================================================
+// REGISTER X COUNT (ARQUEO PARCIAL)
+// ============================================================================
+
+export const registerXCount = webMethod(Permissions.SiteMember, async (diaKey, { metalicoCaja, traceId }) => {
+  try {
+    await requireCajero(traceId);
+    const cleanDiaKey = _readDate(diaKey);
+    if (!cleanDiaKey) {
+      return { status: "ERROR", data: null, error: { code: "INVALID_DATE", message: "Fecha invalida" } };
+    }
+    const countedCash = _readNonNegativeAmount(metalicoCaja);
+    if (countedCash === null) {
+      return { status: "ERROR", data: null, error: { code: "INVALID_AMOUNT", message: "Importe de efectivo contado invalido" } };
+    }
+
+    const cajaCol = COLLECTIONS.CAJA_ACTUAL;
+    const caja = await wixData.get(cajaCol, CAJA_ACTUAL_ID, { suppressAuth: true }).catch(() => null);
+    const expectedCash = _roundMoney(caja?.cashBalance || 0);
+    const discrepancyAmount = _roundMoney(countedCash - expectedCash);
+    const reconciliationStatus = Math.abs(discrepancyAmount) < 0.01 ? "CUADRADO" : "DESCUADRE";
+
+    const res = await wixData.insert(COLLECTIONS.CONTROL_PARCIAL_X, {
+      operationDate: cleanDiaKey,
+      countedCash,
+      expectedCash,
+      discrepancyAmount,
+      reconciliationStatus,
+      countedAt: new Date(),
+      reconciledAt: new Date(),
+      traceId,
+      _createdDate: new Date(),
+    }, { suppressAuth: true });
+
+    // Alerta si hay descuadre
+    if (reconciliationStatus === "DESCUADRE") {
+      await wixData.insert(COLLECTIONS.ALERTAS_OPERATIVAS, {
+        alertType: "CASH_DISCREPANCY",
+        severity: Math.abs(discrepancyAmount) > 10 ? "ERROR" : "WARNING",
+        message: `Descuadre de ${discrepancyAmount} EUR en arqueo X del ${cleanDiaKey}`,
+        status: "OPEN",
+        traceId,
+        _createdDate: new Date(),
+      }, { suppressAuth: true }).catch(() => null);
+    }
+
+    return { status: "SUCCESS", data: res, error: null };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: _toPublicError(err, "X_COUNT_FAIL") };
+  }
+});
+
+// ============================================================================
+// REGISTER Z CLOSING (CIERRE FISCAL DIARIO)
+// [R2-05] Verificar cierre Z existente antes de insertar
+// ============================================================================
+
+export const registerZClosing = webMethod(Permissions.SiteMember, async (diaKey, { traceId }) => {
+  try {
+    await requireCajero(traceId);
+    await validateFiscalConfig(traceId);
+    const { fiscalKey, businessTaxId } = await _getFiscalKeys(traceId);
+    const cleanDiaKey = _readDate(diaKey);
+    if (!cleanDiaKey) {
+      return { status: "ERROR", data: null, error: { code: "INVALID_DATE", message: "Fecha invalida" } };
+    }
+
+    // [R2-05] Verificar que no exista ya un cierre Z para esta fecha
+    const existingZ = await wixData.get(
+      COLLECTIONS.HISTORICO_CIERRES_Z,
+      `Z_${cleanDiaKey}`,
+      { suppressAuth: true }
+    ).catch(() => null);
+
+    if (existingZ) {
+      log.warn("Z_CLOSING_ALREADY_EXISTS: Cierre Z ya registrado para esta fecha", { cleanDiaKey, traceId });
+      return { status: "ERROR", data: null, error: { code: "Z_ALREADY_CLOSED", message: "Ya existe un cierre Z para esta fecha" } };
+    }
+
+    // Fetch all movements for the day (ordenados por sequenceNumber)
+    let allMovements = [];
+    const query = wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
+      .eq("operationDate", cleanDiaKey)
+      .ascending("sequenceNumber")
+      .limit(LEDGER_PAGE_SIZE);
+    let res = await query.find({ suppressAuth: true });
+    allMovements = allMovements.concat(res.items || []);
+    let page = 2;
+    while (res.hasNext() && page <= MAX_LEDGER_BATCH_PAGES) {
+      res = await res.next();
+      allMovements = allMovements.concat(res.items || []);
+      page++;
+    }
+
+    if (allMovements.length === 0) {
+      return { status: "ERROR", data: null, error: { code: "NO_MOVEMENTS", message: "No hay movimientos para cerrar" } };
+    }
+
+    // Calculate totals
+    const totalCash = allMovements.filter(m => m.paymentMethod === FORMA_PAGO.EFECTIVO).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const totalCard = allMovements.filter(m => m.paymentMethod === FORMA_PAGO.TARJETA).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const totalBizum = allMovements.filter(m => m.paymentMethod === FORMA_PAGO.BIZUM).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const totalOnline = allMovements.filter(m => m.paymentMethod === FORMA_PAGO.ONLINE).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const totalRefunds = allMovements.filter(m => m.movementType === TIPO_MOVIMIENTO.REEMBOLSO).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const totalTips = allMovements.filter(m => m.movementType === TIPO_MOVIMIENTO.PROPINA).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const totalAdjustments = allMovements.filter(m => m.movementType === TIPO_MOVIMIENTO.AJUSTE).reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const grossSalesTotal = allMovements.filter(m => m.operationNature === "VENTA").reduce((s, m) => s + Number(m.accountingAmount || 0), 0);
+    const netTaxableAmount = allMovements.reduce((s, m) => s + Number(m.taxableAmount || 0), 0);
+    const netTaxAmount = allMovements.reduce((s, m) => s + Number(m.taxAmount || 0), 0);
+    const consolidatedTotalAmount = _roundMoney(totalCash + totalCard + totalBizum + totalOnline);
+
+    const movementTypeBreakdown = {};
+    for (const m of allMovements) {
+      const mt = m.movementType || "UNKNOWN";
+      movementTypeBreakdown[mt] = _roundMoney((movementTypeBreakdown[mt] || 0) + Number(m.accountingAmount || 0));
+    }
+
+    const taxTypeBreakdown = {};
+    for (const m of allMovements) {
+      const rate = String(Number(m.taxRate) || 0);
+      if (!taxTypeBreakdown[rate]) { taxTypeBreakdown[rate] = { taxableAmount: 0, taxAmount: 0, total: 0, operations: 0 }; }
+      taxTypeBreakdown[rate].taxableAmount = _roundMoney(taxTypeBreakdown[rate].taxableAmount + Number(m.taxableAmount || 0));
+      taxTypeBreakdown[rate].taxAmount = _roundMoney(taxTypeBreakdown[rate].taxAmount + Number(m.taxAmount || 0));
+      taxTypeBreakdown[rate].total = _roundMoney(taxTypeBreakdown[rate].total + Number(m.accountingAmount || 0));
+      taxTypeBreakdown[rate].operations++;
+    }
+
+    // Verify hash chain integrity before closing
+    let expectedPrev = GENESIS_HASH;
+    let integrityVerified = true;
+    for (const mov of allMovements) {
+      if (mov.previousRecordHash && mov.previousRecordHash !== expectedPrev) {
+        integrityVerified = false;
+        log.error("Hash chain integrity violation detected", {
+          traceId,
+          movementId: mov._id,
+          expected: expectedPrev,
+          actual: mov.previousRecordHash,
         });
-    } catch (err) {
-        return { status: "ERROR", data: null, error: _toPublicError(err, "MANUAL_TX_FAIL") };
+        break;
+      }
+      expectedPrev = mov.currentRecordHash || expectedPrev;
     }
+
+    if (!integrityVerified) {
+      return { status: "ERROR", data: null, error: { code: "INTEGRITY_VIOLATION", message: "Hash chain integrity violation detected. Cannot close." } };
+    }
+
+    // Hash chain for closing [R2-04] await
+    const firstMov = allMovements[0];
+    const lastMov = allMovements[allMovements.length - 1];
+    const closingPayload = _stableSerialize({
+      operationDate: cleanDiaKey,
+      consolidatedTotalAmount,
+      grossSalesTotal: _roundMoney(grossSalesTotal),
+      netTaxableAmount: _roundMoney(netTaxableAmount),
+      netTaxAmount: _roundMoney(netTaxAmount),
+      totalOperations: allMovements.length,
+      startSequence: Number(firstMov?.sequenceNumber) || 0,
+      endSequence: Number(lastMov?.sequenceNumber) || 0,
+    });
+    const closingHash = await hashSHA256(closingPayload);
+    const closingSignature = await hmacSha256Hex(fiscalKey, closingHash);
+
+    const zRecord = {
+      _id: `Z_${cleanDiaKey}`,
+      operationDate: cleanDiaKey,
+      closingStatus: "CERRADO",
+      consolidatedTotalAmount,
+      grossSalesTotal: _roundMoney(grossSalesTotal),
+      netTaxableAmount: _roundMoney(netTaxableAmount),
+      netTaxAmount: _roundMoney(netTaxAmount),
+      totalCash: _roundMoney(totalCash),
+      totalCard: _roundMoney(totalCard),
+      totalBizum: _roundMoney(totalBizum),
+      totalOnline: _roundMoney(totalOnline),
+      totalRefunds: _roundMoney(totalRefunds),
+      totalTips: _roundMoney(totalTips),
+      totalAdjustments: _roundMoney(totalAdjustments),
+      totalOperations: allMovements.length,
+      startSequence: Number(firstMov?.sequenceNumber) || 0,
+      endSequence: Number(lastMov?.sequenceNumber) || 0,
+      startTicketNumber: firstMov?.invoiceNumber || "",
+      endTicketNumber: lastMov?.invoiceNumber || "",
+      startRecordHash: firstMov?.previousRecordHash || GENESIS_HASH,
+      endRecordHash: lastMov?.currentRecordHash || GENESIS_HASH,
+      movementTypeBreakdown,
+      taxTypeBreakdown,
+      isIntegrityVerified: true,
+      auditedRecordsCount: allMovements.length,
+      closingHash,
+      closingSignature,
+      closingSource: "CRON",
+      closingSchemaVersion: LEDGER_SCHEMA_VERSION,
+      timeZone: SDK_CONFIG?.TZ || "Europe/Madrid",
+      closedAt: new Date(),
+      verifiedAt: new Date(),
+      traceId,
+      _createdDate: new Date(),
+    };
+
+    const saved = await wixData.insert(COLLECTIONS.HISTORICO_CIERRES_Z, zRecord, { suppressAuth: true });
+
+    // Update CajaActual to closed
+    const cajaCol = COLLECTIONS.CAJA_ACTUAL;
+    const caja = await wixData.get(cajaCol, CAJA_ACTUAL_ID, { suppressAuth: true }).catch(() => null);
+    if (caja) {
+      caja.cashRegisterStatus = CAJA_STATUS.CLOSED;
+      caja.closedAt = new Date();
+      caja._updatedDate = new Date();
+      await wixData.save(cajaCol, caja, { suppressAuth: true });
+    }
+
+    return { status: "SUCCESS", data: saved, error: null };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: _toPublicError(err, "Z_CLOSING_FAIL") };
+  }
 });
 
-export const registerXCount = webMethod(Permissions.SiteMember, async (diaKey, options = {}) => {
-    const traceId = options.traceId || makeTraceId("x-count");
-    try {
-        _rateLimitOrThrow("cajas.registerXCount", "cashier", traceId);
-        await requireCajero(traceId);
-        if (!diaKey) throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "diaKey required", { traceId });
-        const metalicoCaja = Number(options.metalicoCaja);
-        if (!Number.isFinite(metalicoCaja) || metalicoCaja < 0) {
-            throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "metalicoCaja must be a non-negative number", { traceId });
-        }
-        const movements = await _getAllDailyMovements(String(diaKey));
-        const cashProjection = _buildCashierProjection(movements);
-        const countedCash = _roundMoney(metalicoCaja);
-        const totalEfectivoTeorico = cashProjection.saldoEfectivo;
-        const descuadre = _roundMoney(countedCash - totalEfectivoTeorico);
-        const record = {
-            diaKey: String(diaKey),
-            metalicoCaja: countedCash,
-            totalEfectivoTeorico,
-            descuadre,
-            estadoCuadre: Math.abs(descuadre) < 0.01 ? "CUADRADO" : "DESCUADRE",
-            fechaConteo: new Date(),
-            fechaArqueo: new Date(),
-            traceId,
-        };
-        const result = await withTimeout(
-            wixData.insert(COLLECTIONS.CONTEOS_X, record, { suppressAuth: true }),
-            CMS_TIMEOUT_MS,
-            "insertXCount"
-        );
-        return { status: "SUCCESS", data: result, error: null };
-    } catch (error) {
-        return { status: "ERROR", data: null, error: _toPublicError(error, "X_COUNT_FAIL") };
+// ============================================================================
+// VERIFY FISCAL HASH CHAIN INTEGRITY
+// ============================================================================
+
+export async function verifyFiscalHashChainIntegrity(options = {}) {
+  const traceId = options.traceId || makeTraceId("hash-audit");
+  const batchSize = Number(options.limit) || LEDGER_PAGE_SIZE;
+  const breaks = [];
+  try {
+    const movements = await wixData.query(COLLECTIONS.MOVIMIENTOS_CAJA)
+      .ascending("sequenceNumber")
+      .limit(batchSize)
+      .find({ suppressAuth: true });
+
+    let expectedPrev = GENESIS_HASH;
+    for (const mov of movements.items || []) {
+      if (mov.previousRecordHash && mov.previousRecordHash !== expectedPrev) {
+        breaks.push({
+          movementId: mov._id,
+          invoiceNumber: mov.invoiceNumber,
+          expected: expectedPrev,
+          actual: mov.previousRecordHash,
+        });
+      }
+      expectedPrev = mov.currentRecordHash;
     }
-});
 
-export const registerZClosing = webMethod(Permissions.Admin, async (diaKey, options = {}) => {
-    const traceId = options.traceId || makeTraceId("z-closing");
-    try {
-        _rateLimitOrThrow("cajas.registerZClosing", "admin", traceId);
-        await requireAdmin(traceId);
-        if (!diaKey) throw createBookingError(ERROR_CODES.INVALID_PAYLOAD, "diaKey required", { traceId });
-
-        return await _registerZClosingInternal(String(diaKey), { traceId, autoCron: false });
-    } catch (err) {
-        return { status: "ERROR", data: null, error: _toPublicError(err, "Z_CLOSING_FAIL") };
+    if (breaks.length > 0) {
+      await wixData.insert(COLLECTIONS.MM_AUDIT_LOG, {
+        _id: `AUDIT_HASH_${Date.now()}`,
+        eventType: "FISCAL_CHAIN_CORRUPTED",
+        level: "CRITICAL",
+        message: `Detectadas ${breaks.length} rupturas en la cadena de facturas`,
+        data: { breaksCount: breaks.length, details: breaks.slice(0, 5) },
+        loggedAt: new Date(),
+        traceId,
+      }, { suppressAuth: true });
     }
-});
 
-export const verifyIntegrity = webMethod(Permissions.Admin, async (diaKey, options = {}) => {
-    const traceId = options.traceId || makeTraceId("verify-integrity");
-    try {
-        _rateLimitOrThrow("cajas.verifyIntegrity", "admin", traceId);
-        await requireAdmin(traceId);
-        const result = await _verifyIntegrityInternal(diaKey, { ...options, traceId });
-        return { status: "SUCCESS", data: result, error: null };
-    } catch (err) {
-        return { status: "ERROR", data: null, error: _toPublicError(err, "VERIFY_INTEGRITY_FAIL") };
-    }
-});
-
-export const getCashierState = webMethod(Permissions.SiteMember, async (options = {}) => {
-    const traceId = options.traceId || makeTraceId("cashier-state");
-    try {
-        _rateLimitOrThrow("cajas.getCashierState", "cashier", traceId);
-        await requireCajero(traceId);
-
-        const tz = SDK_CONFIG?.TZ || "Europe/Madrid";
-        const hoyStr = new Date().toLocaleString("sv-SE", { timeZone: tz });
-        const diaKey = options.diaKey || hoyStr.substring(0, 10);
-
-        const items = await _getAllDailyMovements(diaKey);
-        const projection = _buildCashierProjection(items);
-
-        return {
-            status: "SUCCESS",
-            data: { diaKey, ...projection },
-            error: null,
-        };
-    } catch (err) {
-        return { status: "ERROR", data: null, error: _toPublicError(err, "CASHIER_STATE_FAIL") };
-    }
-});
+    return {
+      status: breaks.length === 0 ? "SUCCESS" : "INTEGRITY_COMPROMISED",
+      data: { checked: movements.items.length, breaksCount: breaks.length, breaks },
+      error: null,
+    };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: { code: "AUDIT_FAIL", message: err.message } };
+  }
+}

@@ -1,201 +1,77 @@
 /*
 =============================================================================
 MODULE: backend/security.web.js
-VERSION: v5002-rbac-web-facade
-RESPONSIBILITY: Public facade for RBAC checks.
-STANDARDS: G10 ASCII Strict.
+VERSION: v5007.0-FINAL
+BASE: BIBLIA v5002.5 Bloque 12.9 + DIRECTRICES V19
+RESPONSIBILITY: Web methods que envuelven las verificaciones de seguridad
+                para consumo desde frontend. Capa delgada que delega en
+                backend/security.js.
+STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
+           No reimplementa logica de seguridad.
+CORRECTIONS APPLIED:
+  [SECW-01] Delegacion pura en security.js sin duplicacion.
+  [SECW-02] Respuestas uniformes { status, data, error }.
 =============================================================================
 */
 
-import {
-    webMethod,
-    Permissions
-} from "wix-web-module";
-
-import {
-    makeTraceId,
-    _safeTrim
-} from "public/mmUtils";
-
-import {
-    isAdmin,
-    isCajero,
-    isStaffCollaborator,
-    enforceRateLimit
-} from "backend/security";
-
+import { webMethod, Permissions } from "wix-web-module";
+import { makeTraceId } from "public/mmUtils";
+import { logger } from "backend/logger";
+import { isAdmin, isCajero, isStaffCollaborator } from "backend/security";
 import { _toPublicError } from "backend/responseUtils";
 
-async function _checkAccessRateLimit(
-    surface,
-    options,
-    traceId
-) {
-    const key = _safeTrim(
-        options?.key ||
-        options?.email ||
-        "member"
-    );
+const log = logger;
 
-    return enforceRateLimit({
-            surface,
-            key
-        },
-        30,
-        10000
-    );
-}
+// =============================================================================
+// BLOQUE 1 — CHECK ADMIN ACCESS
+// =============================================================================
 
-export const checkAdminAccess = webMethod(
-    Permissions.SiteMember,
-    async (options = {}) => {
-        const traceId =
-            options.traceId ||
-            makeTraceId("wm-admin");
+export const checkAdminAccess = webMethod(Permissions.SiteMember, async (options = {}) => {
+  const traceId = options?.traceId || makeTraceId("sec-admin");
+  try {
+    const authorized = await isAdmin(traceId);
+    return {
+      status: "SUCCESS",
+      data: { authorized, role: authorized ? "ADMIN" : null },
+      error: null,
+    };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: _toPublicError(err, "SEC_ADMIN_FAIL") };
+  }
+});
 
-        try {
-            const limit =
-                await _checkAccessRateLimit(
-                    "security.checkAdminAccess",
-                    options,
-                    traceId
-                );
+// =============================================================================
+// BLOQUE 2 — CHECK CAJERO ACCESS
+// =============================================================================
 
-            if (!limit.allowed) {
-                return {
-                    status: "ERROR",
-                    data: null,
-                    error: {
-                        code: "RATE_LIMITED",
-                        message: "Too many access checks."
-                    }
-                };
-            }
+export const checkCajeroAccess = webMethod(Permissions.SiteMember, async (options = {}) => {
+  const traceId = options?.traceId || makeTraceId("sec-cajero");
+  try {
+    const authorized = await isCajero(traceId);
+    return {
+      status: "SUCCESS",
+      data: { authorized, role: authorized ? "CAJERO" : null },
+      error: null,
+    };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: _toPublicError(err, "SEC_CAJERO_FAIL") };
+  }
+});
 
-            const admin =
-                await isAdmin(traceId);
+// =============================================================================
+// BLOQUE 3 — CHECK STAFF COLLABORATOR ACCESS
+// =============================================================================
 
-            return {
-                status: "SUCCESS",
-                data: {
-                    isAdmin: admin
-                },
-                error: null
-            };
-        } catch (error) {
-            return {
-                status: "ERROR",
-                data: null,
-                error: _toPublicError(
-                    error,
-                    "ADMIN_CHECK_FAIL"
-                )
-            };
-        }
-    }
-);
-
-export const checkCajeroAccess = webMethod(
-    Permissions.SiteMember,
-    async (options = {}) => {
-        const traceId =
-            options.traceId ||
-            makeTraceId("wm-cajero");
-
-        try {
-            const limit =
-                await _checkAccessRateLimit(
-                    "security.checkCajeroAccess",
-                    options,
-                    traceId
-                );
-
-            if (!limit.allowed) {
-                return {
-                    status: "ERROR",
-                    data: null,
-                    error: {
-                        code: "RATE_LIMITED",
-                        message: "Too many access checks."
-                    }
-                };
-            }
-
-            const cajero =
-                await isCajero(traceId);
-
-            return {
-                status: "SUCCESS",
-                data: {
-                    isCajero: cajero
-                },
-                error: null
-            };
-        } catch (error) {
-            return {
-                status: "ERROR",
-                data: null,
-                error: _toPublicError(
-                    error,
-                    "CAJERO_CHECK_FAIL"
-                )
-            };
-        }
-    }
-);
-
-export const checkStaffCollaboratorAccess =
-    webMethod(
-        Permissions.SiteMember,
-        async (options = {}) => {
-            const traceId =
-                options.traceId ||
-                makeTraceId("wm-staff-collab");
-
-            try {
-                const limit =
-                    await _checkAccessRateLimit(
-                        "security.checkStaffCollaboratorAccess",
-                        options,
-                        traceId
-                    );
-
-                if (!limit.allowed) {
-                    return {
-                        status: "ERROR",
-                        data: null,
-                        error: {
-                            code: "RATE_LIMITED",
-                            message: "Too many access checks."
-                        }
-                    };
-                }
-
-                const staffCollaborator =
-                    await isStaffCollaborator(
-                        traceId
-                    );
-
-                const marianManager =
-                    await isCajero(traceId);
-
-                return {
-                    status: "SUCCESS",
-                    data: {
-                        isStaffCollaborator: staffCollaborator,
-                        isMarianManager: marianManager
-                    },
-                    error: null
-                };
-            } catch (error) {
-                return {
-                    status: "ERROR",
-                    data: null,
-                    error: _toPublicError(
-                        error,
-                        "STAFF_COLLAB_CHECK_FAIL"
-                    )
-                };
-            }
-        }
-    );
+export const checkStaffCollaboratorAccess = webMethod(Permissions.SiteMember, async (options = {}) => {
+  const traceId = options?.traceId || makeTraceId("sec-staff");
+  try {
+    const authorized = await isStaffCollaborator(traceId);
+    return {
+      status: "SUCCESS",
+      data: { authorized, role: authorized ? "COLLABORATOR" : null },
+      error: null,
+    };
+  } catch (err) {
+    return { status: "ERROR", data: null, error: _toPublicError(err, "SEC_STAFF_FAIL") };
+  }
+});

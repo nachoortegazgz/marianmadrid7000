@@ -1,774 +1,259 @@
 /*
 =============================================================================
 MODULE: backend/data.js
-VERSION: v5005-5
-RESPONSIBILITY: CMS data hooks and validation rules.
+VERSION: v5007.0-FINAL
+BASE: BIBLIA v5002.5 Bloque 11 + ESQUEMA CMS v5002.5 Seccion 7 + DOSSIER CAJA Seccion 24
+RESPONSIBILITY: Hooks de inmutabilidad y validacion para Wix Data.
+                Protege colecciones fiscales, laborales y contables contra
+                modificacion o borrado no autorizado.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
+           Excepciones con codigos especificos:
+           - FISCAL_VIOLATION (MovimientosCaja, HistoricoCierresZ)
+           - SIF_VIOLATION (EventosSistemaFacturacion)
+           - LABOR_LOG_VIOLATION (RegistrosHorariosStaff)
+           - SCHEMA_VIOLATION (ServiciosCatalogo, MapaStaff)
+CORRECTIONS APPLIED:
+  [DATA-01] Todos los hooks de inmutabilidad implementados.
+  [DATA-02] Validacion de esquema en ServiciosCatalogo.
+  [DATA-03] Validacion de unicidad en MapaStaff.
+  [DATA-04] Bloqueo condicional en AsientosContables (POSTED/LOCKED).
+  [DATA-05] Singleton protegido en CajaActual.
 =============================================================================
 */
 
-import { getMadridLocalStringNoZ } from "public/mmUtils";
+import wixData from "wix-data";
 
-import {
-    SINGLETONS,
-    TIPO_FICHAJE,
-    CITA_FIELDS,
-    ESTADO_CITA,
-    ESTADO_PAGO,
-    SERVICE_CATALOG
-} from "backend/internalConfig";
+// =============================================================================
+// BLOQUE 1 — INMUTABILIDAD FISCAL (MovimientosCaja)
+// =============================================================================
 
-import { findStaff } from "backend/staff";
-
-const CAJA_ACTUAL_SINGLETON_ID =
-    SINGLETONS?.CAJA || "CAJA_PRINCIPAL";
-
-const SHA256_HEX_RE = /^[0-9a-f]{64}$/i;
-
-const GUID_RE =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-const SERVICE_STATES = new Set(
-    SERVICE_CATALOG?.STATES || [
-        "ACTIVO",
-        "INACTIVO",
-        "BORRADOR"
-    ]
-);
-
-const PAYMENT_STATES = new Set(
-    Object.values(ESTADO_PAGO || {})
-);
-
-function isObject(value) {
-    return value !== null &&
-        typeof value === "object" &&
-        !Array.isArray(value);
+export function MovimientosCaja_beforeUpdate(item, context) {
+  throw new Error("FISCAL_VIOLATION: Modificacion de MovimientosCaja prohibida por normativa fiscal");
 }
 
-function isSuppressed(context) {
-    return context?.suppressHooks === true;
+export function MovimientosCaja_beforeRemove(item, context) {
+  throw new Error("FISCAL_VIOLATION: Borrado de MovimientosCaja prohibido por normativa fiscal");
 }
 
-function toDate(value) {
-    if (!value) {
-        return null;
-    }
+// =============================================================================
+// BLOQUE 2 — INMUTABILIDAD FISCAL (HistoricoCierresZ)
+// =============================================================================
 
-    const date = value instanceof Date ?
-        value :
-        new Date(value);
-
-    return Number.isNaN(date.getTime()) ?
-        null :
-        date;
+export function HistoricoCierresZ_beforeUpdate(item, context) {
+  throw new Error("FISCAL_VIOLATION: Modificacion de HistoricoCierresZ prohibida por normativa fiscal");
 }
 
-function normalizeDateField(item, field, fallback = null) {
-    const parsed = toDate(item[field]);
-    item[field] = parsed || fallback;
+export function HistoricoCierresZ_beforeRemove(item, context) {
+  throw new Error("FISCAL_VIOLATION: Borrado de HistoricoCierresZ prohibido por normativa fiscal");
 }
 
-function normalizeBoundedText(item, field, maxLength) {
-    if (
-        item[field] === undefined ||
-        item[field] === null
-    ) {
-        return;
-    }
+// =============================================================================
+// BLOQUE 3 — INMUTABILIDAD SIF (EventosSistemaFacturacion)
+// =============================================================================
 
-    const text = String(item[field]).trim();
-
-    if (text.length > maxLength) {
-        throw new Error(
-            `SERVICE_VALIDATION: ${field} exceeds the permitted length.`
-        );
-    }
-
-    item[field] = text;
+export function EventosSistemaFacturacion_beforeUpdate(item, context) {
+  throw new Error("SIF_VIOLATION: Modificacion de EventosSistemaFacturacion prohibida por normativa SIF");
 }
 
-function normalizeCatalogReference(value) {
-    const candidate = value &&
-        typeof value === "object" ?
-        (
-            value.categoryName ||
-            value._id ||
-            value.id
-        ) :
-        value;
-
-    return String(candidate || "")
-        .trim()
-        .toUpperCase();
+export function EventosSistemaFacturacion_beforeRemove(item, context) {
+  throw new Error("SIF_VIOLATION: Borrado de EventosSistemaFacturacion prohibido por normativa SIF");
 }
 
-function readDuration(item, field) {
-    const raw = item[field];
+// =============================================================================
+// BLOQUE 4 — INMUTABILIDAD LABORAL (RegistrosHorariosStaff)
+// =============================================================================
 
-    if (
-        raw === undefined ||
-        raw === null ||
-        raw === ""
-    ) {
-        return 0;
-    }
-
-    const value = Number(raw);
-    const maxDuration =
-        SERVICE_CATALOG?.MAX_DURATION_MINUTES || 1440;
-
-    if (
-        !Number.isFinite(value) ||
-        value < 0 ||
-        value > maxDuration
-    ) {
-        throw new Error(
-            `SERVICE_VALIDATION: ${field} must be between 0 and ${maxDuration}.`
-        );
-    }
-
-    return value;
+export function RegistrosHorariosStaff_beforeUpdate(item, context) {
+  throw new Error("LABOR_LOG_VIOLATION: Modificacion de RegistrosHorariosStaff prohibida por Art. 34.9 ET");
 }
 
-function validateServiciosCatalogo(item, context) {
-    if (
-        !isObject(item) ||
-        isSuppressed(context)
-    ) {
-        return item;
-    }
-
-    normalizeBoundedText(
-        item,
-        "title",
-        SERVICE_CATALOG?.MAX_TITLE_LENGTH || 160
-    );
-
-    normalizeBoundedText(
-        item,
-        "tagLine",
-        SERVICE_CATALOG?.MAX_SUMMARY_LENGTH || 120
-    );
-
-    normalizeBoundedText(
-        item,
-        "description",
-        SERVICE_CATALOG?.MAX_DESCRIPTION_LENGTH || 6000
-    );
-
-    const status = normalizeCatalogReference(
-        item.status
-    );
-
-    if (status) {
-        if (!SERVICE_STATES.has(status)) {
-            throw new Error(
-                "SERVICE_VALIDATION: status is not valid."
-            );
-        }
-
-        item.status = status;
-    }
-
-    const category = normalizeCatalogReference(
-        item.categoryName
-    );
-
-    if (category) {
-        item.categoryName = category;
-    }
-
-    const currency = normalizeCatalogReference(
-        item.currency
-    );
-
-    if (
-        currency &&
-        currency !== (
-            SERVICE_CATALOG?.CURRENCY || "EUR"
-        )
-    ) {
-        throw new Error(
-            "SERVICE_VALIDATION: only EUR is supported."
-        );
-    }
-
-    if (
-        item.price !== undefined &&
-        item.price !== null &&
-        item.price !== ""
-    ) {
-        const price = Number(item.price);
-
-        if (
-            !Number.isFinite(price) ||
-            price < 0
-        ) {
-            throw new Error(
-                "SERVICE_VALIDATION: price must be non-negative."
-            );
-        }
-
-        item.price = Math.round(
-            (price + Number.EPSILON) * 100
-        ) / 100;
-    }
-
-    const phase1Duration = readDuration(
-        item,
-        "phase1Duration"
-    );
-
-    const exposureDuration = readDuration(
-        item,
-        "exposureDuration"
-    );
-
-    const phase2Duration = readDuration(
-        item,
-        "phase2Duration"
-    );
-
-    item.phase1Duration = phase1Duration;
-    item.exposureDuration = exposureDuration;
-    item.phase2Duration = phase2Duration;
-
-    const calculatedTotal =
-        phase1Duration +
-        exposureDuration +
-        phase2Duration;
-
-    if (calculatedTotal > 0) {
-        item.totalDuration = calculatedTotal;
-    } else {
-        const currentTotal = Number(item.totalDuration);
-
-        item.totalDuration =
-            Number.isFinite(currentTotal) &&
-            currentTotal > 0 ?
-            currentTotal :
-            30;
-    }
-
-    const totalDuration = Number(item.totalDuration);
-
-    if (
-        !Number.isFinite(totalDuration) ||
-        totalDuration <= 0 ||
-        totalDuration >
-        (SERVICE_CATALOG?.MAX_DURATION_MINUTES || 1440)
-    ) {
-        throw new Error(
-            "SERVICE_VALIDATION: totalDuration is invalid."
-        );
-    }
-
-    /*
-     * If no phase has been configured, totalDuration is accepted
-     * as the standalone service duration.
-     */
-    if (calculatedTotal > 0) {
-        const difference = Math.abs(
-            calculatedTotal - totalDuration
-        );
-
-        if (difference > 0.01) {
-            throw new Error(
-                "SERVICE_VALIDATION: phase durations must equal totalDuration."
-            );
-        }
-    }
-
-    item.totalDuration = totalDuration;
-
-    return item;
+export function RegistrosHorariosStaff_beforeRemove(item, context) {
+  throw new Error("LABOR_LOG_VIOLATION: Borrado de RegistrosHorariosStaff prohibido por Art. 34.9 ET");
 }
 
-export function ServiciosCatalogo_beforeInsert(
-    item,
-    context
-) {
-    return validateServiciosCatalogo(item, context);
+// =============================================================================
+// BLOQUE 5 — SINGLETON PROTEGIDO (CajaActual)
+// =============================================================================
+
+export function CajaActual_beforeRemove(item, context) {
+  throw new Error("SINGLETON_PROTECTED: No se puede eliminar el estado de caja");
 }
 
-export function ServiciosCatalogo_beforeUpdate(
-    item,
-    context
-) {
-    return validateServiciosCatalogo(item, context);
+// =============================================================================
+// BLOQUE 6 — VALIDACION DE ESQUEMA (ServiciosCatalogo)
+// [DATA-02]
+// =============================================================================
+
+export function ServiciosCatalogo_beforeInsert(item, context) {
+  _validateServiciosCatalogoSchema(item);
+  return item;
 }
 
-function validateMapaStaff(item, context) {
-    if (
-        !isObject(item) ||
-        isSuppressed(context)
-    ) {
-        return item;
-    }
-
-    const resourceId = String(
-        item.resourceId || ""
-    ).trim();
-
-    if (!GUID_RE.test(resourceId)) {
-        throw new Error(
-            "STAFF_VALIDATION: resourceId must be a valid GUID."
-        );
-    }
-
-    item.resourceId = resourceId;
-
-    normalizeBoundedText(
-        item,
-        "displayName",
-        80
-    );
-
-    if (!item.displayName) {
-        throw new Error(
-            "STAFF_VALIDATION: displayName is required."
-        );
-    }
-
-    normalizeBoundedText(
-        item,
-        "staffMemberId",
-        120
-    );
-
-    normalizeBoundedText(
-        item,
-        "email",
-        254
-    );
-
-    normalizeBoundedText(
-        item,
-        "scheduleId",
-        120
-    );
-
-    normalizeBoundedText(
-        item,
-        "rol",
-        60
-    );
-
-    if (item.email) {
-        item.email = item.email
-            .trim()
-            .toLowerCase();
-    }
-
-    if (!item.staffMemberId) {
-        throw new Error(
-            "STAFF_VALIDATION: staffMemberId is required."
-        );
-    }
-
-    item.active = item.active !== false;
-    item.updatedAt = new Date();
-
-    return item;
+export function ServiciosCatalogo_beforeUpdate(item, context) {
+  _validateServiciosCatalogoSchema(item);
+  return item;
 }
 
-export function MapaStaff_beforeInsert(
-    item,
-    context
-) {
-    return validateMapaStaff(item, context);
+function _validateServiciosCatalogoSchema(item) {
+  // Validar que si es dual, tiene linkedPhases
+  if (item.allowCombine === true && !item.linkedPhases) {
+    throw new Error("SCHEMA_VIOLATION: Servicio dual requiere linkedPhases (F2)");
+  }
+
+  // Validar que serviceId es GUID si existe
+  if (item.serviceId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.serviceId)) {
+    throw new Error("SCHEMA_VIOLATION: serviceId debe ser un GUID valido");
+  }
+
+  // Validar duraciones positivas
+  const p1 = Number(item.phase1Duration) || 0;
+  const exp = Number(item.exposureDuration) || 0;
+  const p2 = Number(item.phase2Duration) || 0;
+  const total = Number(item.totalDuration) || 0;
+
+  if (p1 < 0 || exp < 0 || p2 < 0 || total < 0) {
+    throw new Error("SCHEMA_VIOLATION: Las duraciones no pueden ser negativas");
+  }
+
+  // Validar que totalDuration es coherente si es dual
+  if (item.allowCombine === true && total > 0) {
+    const expected = p1 + exp + p2;
+    if (expected > 0 && Math.abs(total - expected) > 1) {
+      throw new Error(`SCHEMA_VIOLATION: totalDuration (${total}) no coincide con suma de fases (${expected})`);
+    }
+  }
 }
 
-export function MapaStaff_beforeUpdate(
-    item,
-    context
-) {
-    return validateMapaStaff(item, context);
+// =============================================================================
+// BLOQUE 7 — VALIDACION DE UNICIDAD (MapaStaff)
+// [DATA-03]
+// =============================================================================
+
+export function MapaStaff_beforeInsert(item, context) {
+  return _validateMapaStaffUniqueness(item);
 }
 
-function normalizeBookingStatus(item) {
-    const status = String(
-        item[CITA_FIELDS.STATUS] ||
-        ESTADO_CITA.CONFIRMED
-    ).trim().toUpperCase();
-
-    const paymentStatus = String(
-        item[CITA_FIELDS.STATUS_PAGO] ||
-        ESTADO_PAGO.UNPAID ||
-        "UNPAID"
-    ).trim().toUpperCase();
-
-    item[CITA_FIELDS.STATUS] = status;
-    item[CITA_FIELDS.STATUS_PAGO] = paymentStatus;
-
-    return {
-        status,
-        paymentStatus
-    };
+export function MapaStaff_beforeUpdate(item, context) {
+  return _validateMapaStaffUniqueness(item);
 }
 
-function validateBookingStatus(item) {
-    const values = normalizeBookingStatus(item);
+async function _validateMapaStaffUniqueness(item) {
+  if (item.resourceId) {
+    const existingByResource = await wixData
+      .query("MapaStaff")
+      .eq("resourceId", item.resourceId)
+      .ne("_id", item._id || "")
+      .limit(1)
+      .find({ suppressAuth: true });
 
-    if (
-        !Object.values(ESTADO_CITA).includes(
-            values.status
-        )
-    ) {
-        throw new Error(
-            "CITAS_VIOLATION: Invalid booking status."
-        );
+    if (existingByResource?.items?.length > 0) {
+      throw new Error("SCHEMA_VIOLATION: resourceId duplicado en MapaStaff");
     }
+  }
 
-    if (
-        PAYMENT_STATES.size > 0 &&
-        !PAYMENT_STATES.has(values.paymentStatus)
-    ) {
-        throw new Error(
-            "CITAS_VIOLATION: Invalid payment status."
-        );
+  if (item.staffMemberId) {
+    const existingByMember = await wixData
+      .query("MapaStaff")
+      .eq("staffMemberId", item.staffMemberId)
+      .ne("_id", item._id || "")
+      .limit(1)
+      .find({ suppressAuth: true });
+
+    if (existingByMember?.items?.length > 0) {
+      throw new Error("SCHEMA_VIOLATION: staffMemberId duplicado en MapaStaff");
     }
+  }
+
+  return item;
 }
 
-function validateCita(item, context, isInsert) {
-    if (
-        !isObject(item) ||
-        isSuppressed(context)
-    ) {
-        return item;
-    }
+// =============================================================================
+// BLOQUE 8 — BLOQUEO CONDICIONAL (AsientosContables)
+// [DATA-04]
+// =============================================================================
 
-    const bookingId = String(
-        item.bookingId || ""
-    ).trim();
-
-    if (!bookingId) {
-        throw new Error(
-            "CITAS_VIOLATION: Missing bookingId."
-        );
-    }
-
-    item.bookingId = bookingId;
-
-    const now = new Date();
-
-    normalizeDateField(
-        item,
-        "startDate",
-        null
-    );
-
-    normalizeDateField(
-        item,
-        "endDate",
-        null
-    );
-
-    if (isInsert) {
-        normalizeDateField(
-            item,
-            "registeredAt",
-            now
-        );
-
-        normalizeDateField(
-            item,
-            "version",
-            null
-        );
-
-        if (
-            !Number.isInteger(
-                Number(item.version)
-            ) ||
-            Number(item.version) < 1
-        ) {
-            item.version = 1;
-        }
-    } else {
-        normalizeDateField(
-            item,
-            "updatedAt",
-            now
-        );
-
-        if (
-            item.version !== undefined &&
-            item.version !== null
-        ) {
-            const version = Number(item.version);
-
-            if (
-                !Number.isInteger(version) ||
-                version < 1
-            ) {
-                throw new Error(
-                    "CITAS_VIOLATION: Invalid version."
-                );
-            }
-
-            item.version = version;
-        }
-    }
-
-    if (
-        item.startDate &&
-        item.endDate &&
-        item.endDate <= item.startDate
-    ) {
-        throw new Error(
-            "CITAS_VIOLATION: endDate must be after startDate."
-        );
-    }
-
-    if (
-        !item.dateYmd &&
-        item.startDate
-    ) {
-        item.dateYmd = getMadridLocalStringNoZ(
-            item.startDate
-        ).slice(0, 10);
-    }
-
-    validateBookingStatus(item);
-
-    return item;
+export function AsientosContables_beforeUpdate(item, context) {
+  if (item.entryStatus === "POSTED" || item.entryStatus === "LOCKED") {
+    throw new Error("FISCAL_VIOLATION: No se puede modificar un asiento POSTED o LOCKED");
+  }
+  return item;
 }
 
-export function CitasF2_beforeInsert(
-    item,
-    context
-) {
-    return validateCita(
-        item,
-        context,
-        true
-    );
+export function AsientosContables_beforeRemove(item, context) {
+  if (item.entryStatus === "POSTED" || item.entryStatus === "LOCKED") {
+    throw new Error("FISCAL_VIOLATION: No se puede eliminar un asiento POSTED o LOCKED");
+  }
+  return item;
 }
 
-export function CitasF2_beforeUpdate(
-    item,
-    context
-) {
-    return validateCita(
-        item,
-        context,
-        false
-    );
-}
+// =============================================================================
+// BLOQUE 9 — BLOQUEO CONDICIONAL (LineasAsientoContable)
+// =============================================================================
 
-function validateSha256(value) {
-    return SHA256_HEX_RE.test(
-        String(value || "").trim()
-    );
-}
+export async function LineasAsientoContable_beforeUpdate(item, context) {
+  // Verificar si el asiento padre esta posteado
+  if (item.journalEntryId) {
+    const parentEntry = await wixData
+      .get("AsientosContables", item.journalEntryId, { suppressAuth: true })
+      .catch(() => null);
 
-export function MovimientosCaja_beforeInsert(
-    item,
-    context
-) {
-    if (
-        !isObject(item) ||
-        isSuppressed(context)
-    ) {
-        return item;
+    if (parentEntry && (parentEntry.entryStatus === "POSTED" || parentEntry.entryStatus === "LOCKED")) {
+      throw new Error("FISCAL_VIOLATION: No se puede modificar linea de asiento POSTED o LOCKED");
     }
-
-    if (
-        !validateSha256(
-            item.currentRecordHash
-        )
-    ) {
-        throw new Error(
-            "FISCAL_VIOLATION: Invalid currentRecordHash."
-        );
-    }
-
-    if (
-        !validateSha256(
-            item.previousRecordHash
-        )
-    ) {
-        throw new Error(
-            "FISCAL_VIOLATION: Invalid previousRecordHash."
-        );
-    }
-
-    const signatureParts = String(
-        item.digitalSignature || ""
-    ).trim().split("|");
-
-    if (
-        signatureParts.length !== 2 ||
-        !validateSha256(signatureParts[0]) ||
-        !validateSha256(signatureParts[1])
-    ) {
-        throw new Error(
-            "FISCAL_VIOLATION: Invalid digitalSignature."
-        );
-    }
-
-    if (!String(item.invoiceNumber || "").trim()) {
-        throw new Error(
-            "FISCAL_VIOLATION: Missing invoiceNumber."
-        );
-    }
-
-    normalizeDateField(
-        item,
-        "registeredAt",
-        new Date()
-    );
-
-    return item;
+  }
+  return item;
 }
 
-export function MovimientosCaja_beforeUpdate() {
-    throw new Error(
-        "FISCAL_VIOLATION: Direct updates are forbidden."
-    );
-}
+export async function LineasAsientoContable_beforeRemove(item, context) {
+  if (item.journalEntryId) {
+    const parentEntry = await wixData
+      .get("AsientosContables", item.journalEntryId, { suppressAuth: true })
+      .catch(() => null);
 
-export function MovimientosCaja_beforeRemove() {
-    throw new Error(
-        "FISCAL_VIOLATION: Direct removals are forbidden."
-    );
-}
-
-export async function RegistrosHorariosStaff_beforeInsert(
-    item,
-    context
-) {
-    if (
-        !isObject(item) ||
-        isSuppressed(context)
-    ) {
-        return item;
+    if (parentEntry && (parentEntry.entryStatus === "POSTED" || parentEntry.entryStatus === "LOCKED")) {
+      throw new Error("FISCAL_VIOLATION: No se puede eliminar linea de asiento POSTED o LOCKED");
     }
+  }
+  return item;
+}
 
-    const resourceId = String(
-        item.resourceId || ""
-    ).trim();
+// =============================================================================
+// BLOQUE 10 — SECUENCIA TICKETS (Sin salto regresivo)
+// [DATA-05]
+// =============================================================================
 
-    if (!GUID_RE.test(resourceId)) {
-        throw new Error(
-            "INVALID_EMPLOYEE: Invalid resourceId."
-        );
+export async function SecuenciaTickets_beforeUpdate(item, context) {
+  // Obtener el documento anterior para verificar que no hay salto regresivo
+  const existing = await wixData
+    .get("SecuenciaTickets", item._id, { suppressAuth: true })
+    .catch(() => null);
+
+  if (existing && existing.sequenceCounters) {
+    const oldGlobal = Number(existing.sequenceCounters.seqGlobal) || 0;
+    const newGlobal = Number(item.sequenceCounters?.seqGlobal) || 0;
+
+    if (newGlobal < oldGlobal) {
+      throw new Error("SEQUENCE_VIOLATION: No se permite salto regresivo en secuencia de tickets");
     }
+  }
 
-    const staff = await findStaff(resourceId);
-
-    if (!staff) {
-        throw new Error(
-            "INVALID_EMPLOYEE: Employee is not registered."
-        );
-    }
-
-    const clockEventType = String(
-        item.clockEventType || ""
-    ).trim().toUpperCase();
-
-    if (
-        !Object.values(TIPO_FICHAJE)
-        .includes(clockEventType)
-    ) {
-        throw new Error(
-            `INVALID_CLOCK_TYPE: Invalid type "${clockEventType}".`
-        );
-    }
-
-    if (
-        clockEventType === TIPO_FICHAJE.AJUSTE &&
-        !String(item.adjustmentReason || "").trim()
-    ) {
-        throw new Error(
-            "INVALID_CLOCK_ADJUSTMENT: Reason is required."
-        );
-    }
-
-    const now = new Date();
-    const recordedAt =
-        toDate(item.recordedAt) || now;
-
-    if (
-        recordedAt.getTime() >
-        now.getTime() + 60000
-    ) {
-        throw new Error(
-            "INVALID_TIMESTAMP: Future timestamps are forbidden."
-        );
-    }
-
-    const madrid = getMadridLocalStringNoZ(
-        recordedAt
-    );
-
-    item.resourceId = staff.resourceId;
-    item.displayName = staff.displayName;
-    item.clockEventType = clockEventType;
-    item.recordedAt = recordedAt;
-    item.recordedTime = madrid.slice(11, 19);
-    item.dayKey = madrid.slice(0, 10);
-    item.monthKey = madrid.slice(0, 7);
-
-    return item;
+  return item;
 }
 
-export function RegistrosHorariosStaff_beforeUpdate() {
-    throw new Error(
-        "LABOR_LOG_VIOLATION: Direct updates are forbidden."
-    );
+// =============================================================================
+// BLOQUE 11 — CIERRE DE INVENTARIO FIRMADO
+// =============================================================================
+
+export function InventarioStockVentaCierre_beforeUpdate(item, context) {
+  if (item.closingHash) {
+    throw new Error("FISCAL_VIOLATION: No se puede modificar un cierre de inventario firmado");
+  }
+  return item;
 }
 
-export function RegistrosHorariosStaff_beforeRemove() {
-    throw new Error(
-        "LABOR_LOG_VIOLATION: Direct removals are forbidden."
-    );
-}
-
-export function HistoricoCierresZ_beforeUpdate() {
-    throw new Error(
-        "FISCAL_VIOLATION: Direct updates are forbidden."
-    );
-}
-
-export function HistoricoCierresZ_beforeRemove() {
-    throw new Error(
-        "FISCAL_VIOLATION: Direct removals are forbidden."
-    );
-}
-
-export function EventosSistemaFacturacion_beforeUpdate() {
-    throw new Error(
-        "SIF_VIOLATION: Direct updates are forbidden."
-    );
-}
-
-export function EventosSistemaFacturacion_beforeRemove() {
-    throw new Error(
-        "SIF_VIOLATION: Direct removals are forbidden."
-    );
-}
-
-export function CajaActual_beforeInsert(item) {
-    if (isObject(item)) {
-        item._id = CAJA_ACTUAL_SINGLETON_ID;
-    }
-
-    return item;
-}
-
-export function CajaActual_beforeUpdate(item) {
-    if (isObject(item)) {
-        item._id = CAJA_ACTUAL_SINGLETON_ID;
-    }
-
-    return item;
-}
-
-export function CajaActual_beforeRemove() {
-    throw new Error(
-        "SINGLETON_PROTECTED: Direct deletion is forbidden."
-    );
+export function InventarioStockVentaCierre_beforeRemove(item, context) {
+  if (item.closingHash) {
+    throw new Error("FISCAL_VIOLATION: No se puede eliminar un cierre de inventario firmado");
+  }
+  return item;
 }
