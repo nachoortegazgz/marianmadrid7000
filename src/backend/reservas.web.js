@@ -1,14 +1,13 @@
 /*
 =============================================================================
 MODULE: backend/reservas.web.js
-VERSION: v5007.0-FINAL
+VERSION: v5007.1-FINAL (FIX A1 aplicado)
 BASE: BIBLIA v5002.5 + MOTOR DE RESERVAS + DIRECTRICES V19 + ESQUEMA CMS v5002.5
 RESPONSIBILITY: Motor de disponibilidad. Consulta Wix Bookings V2 API,
                 construye slots duales con gap, balancea carga por profesional,
-                gestiona cache multicapa (RAM + CMS) y rate limiting por superficie.
+                gestiona cache multicapa (RAM + CMS) y rate limiting.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
            ZERO legacy (serviceId, linkedPhases, resourceId).
-           ZERO dependencias de Node.js.
 CORRECTIONS APPLIED:
   [RES-01] Colecciones canonicas del SSOT (Fix R2-06).
   [RES-02] Nomenclatura v19.6: serviceId, linkedPhases (Fix R2-07).
@@ -18,6 +17,9 @@ CORRECTIONS APPLIED:
   [RES-06] Balanceo por carga horaria con _rankResourcesByLoad.
   [RES-07] Gap que libera profesional durante exposureDuration.
   [RES-08] Revalidacion en tiempo real antes de Saga (skipCache: true).
+  [FIX A1] _resolveStaffForSlotInternal() implementado completamente.
+           Revalida F1 y F2 contra Wix API, valida candidatos comunes,
+           aplica balanceo por carga si no hay resourceId solicitado.
 =============================================================================
 */
 
@@ -57,9 +59,7 @@ const log = logger;
 
 // =============================================================================
 // BLOQUE 1 — CONSTANTES CANONICAS DEL SSOT
-// [RES-01] Fix R2-06: Colecciones canonicas
 // =============================================================================
-
 const SERVICIOS_COL = COLLECTIONS.SERVICIOS_CATALOGO;
 const DUAL_CACHE_COL = COLLECTIONS.DUAL_SLOT_CACHE;
 const DAYS_CACHE_COL = COLLECTIONS.AVAILABILITY_DAYS_CACHE;
@@ -77,7 +77,6 @@ const DAYS_CACHE_VERSION = SDK_CONFIG.CACHE.DAYS_CACHE_VERSION;
 // =============================================================================
 // BLOQUE 2 — RESOLUCION DE LOCATION
 // =============================================================================
-
 function _resolveTimeSlotsLocationOrThrow() {
   const id = _safeTrim(SDK_CONFIG?.LOCATION_ID);
   const locationType = _safeTrim(SDK_CONFIG?.LOCATION_TYPES?.TIME_SLOTS);
@@ -88,14 +87,11 @@ function _resolveTimeSlotsLocationOrThrow() {
 }
 
 const LOCATION_TS = _resolveTimeSlotsLocationOrThrow();
-
 const ACTIVE_NATIVE_ADDON_IDS = new Set(BOOKINGS_ADDON_CONFIG.ACTIVE_NATIVE_IDS);
 
 // =============================================================================
 // BLOQUE 3 — CACHE RAM MULTICAPA
-// [RES-05] Capa 1: RAM con LRU manual
 // =============================================================================
-
 const availabilityCache = new Map();
 const inflightRequests = new Map();
 const serviceCatalogRAM = new Map();
@@ -125,7 +121,6 @@ async function _getStaffDisplayName(resourceId) {
 // =============================================================================
 // BLOQUE 4 — HELPERS
 // =============================================================================
-
 function _toPublicError(err, fallbackCode = "INTERNAL_ERROR", fallbackMessage = "Internal Error") {
   return { code: String(err?.code || fallbackCode), message: String(err?.message || fallbackMessage) };
 }
@@ -171,9 +166,7 @@ function _isValidMadridYmd(value) {
   const month = Number(match[2]);
   const day = Number(match[3]);
   const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-  return date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day;
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 function _addDaysYMD(ymd, days) {
@@ -230,11 +223,8 @@ function _minutesBetweenUtcDates(a, b) {
 
 // =============================================================================
 // BLOQUE 5 — MAPEO DE SERVICIO (ServiciosCatalogo -> UX)
-// [RES-03] Fix R2-14: Campos canonicos del ESQUEMA CMS v5002.5
 // =============================================================================
-
 async function _mapServiceToPresentation(service, traceId) {
-  // [RES-02] serviceId canonico
   const serviceId = _safeTrim(service.serviceId || service._id);
   if (!_looksLikeGuid(serviceId)) {
     throw new Error("ServiciosCatalogo invalid: serviceId missing or not a GUID");
@@ -245,13 +235,11 @@ async function _mapServiceToPresentation(service, traceId) {
   const allowCombine = !hidden && service.allowCombine === true && !!service.linkedPhases;
   const linkedPhases = _safeTrim(service.linkedPhases) || null;
 
-  // [RES-03] Duraciones canonicas
   const phase1Duration = Number(service.phase1Duration) || 0;
   const exposureDuration = Number(service.exposureDuration) || 0;
   const phase2Duration = Number(service.phase2Duration) || 0;
   const totalDuration = Number(service.totalDuration) ||
-    (allowCombine && linkedPhases ? phase1Duration + exposureDuration + phase2Duration : phase1Duration) ||
-    30;
+    (allowCombine && linkedPhases ? phase1Duration + exposureDuration + phase2Duration : phase1Duration) || 30;
 
   const title = _safeTrim(service.title || service.tituloServicio) || "Servicio";
   const price = Number(service.price || service.precioServicio) || 0;
@@ -262,7 +250,6 @@ async function _mapServiceToPresentation(service, traceId) {
   const mainMedia = service.mainMedia || service.principalMultimedia || null;
   const serviceType = _safeTrim(service.serviceType || service.servicioTipo) || "SIMPLE";
 
-  // [RES-03] Staff disponible (MULTI_REF a MapaStaff)
   const availableStaff = Array.isArray(service.availableStaff) ? service.availableStaff : [];
   const staffOptions = await Promise.all(
     availableStaff.map(async (resourceId) => {
@@ -271,7 +258,6 @@ async function _mapServiceToPresentation(service, traceId) {
     })
   );
 
-  // Addons (MULTI_REF a ComplementosCatalogo)
   const addOnOptions = Array.isArray(service.addOnOptions) ? service.addOnOptions : [];
 
   return {
@@ -307,7 +293,6 @@ async function _mapServiceToPresentation(service, traceId) {
 // =============================================================================
 // BLOQUE 6 — RESOLUCION DE SERVICIO (INTERNO)
 // =============================================================================
-
 async function _getServiceBySlugOrIdInternal(slugOrId, externalTraceId = null) {
   const traceId = externalTraceId || makeTraceId("service");
   const raw = _safeTrim(slugOrId);
@@ -381,7 +366,6 @@ async function _resolveServiceIdInternal(candidate) {
 // =============================================================================
 // BLOQUE 7 — BOOKINGS V2: LIST TIME SLOTS
 // =============================================================================
-
 async function _listTimeSlotsV2({ serviceId, fromLocalDate, toLocalDate, resourceIds, nativeAddonIds = [] }, options = {}) {
   const { skipCache = false, timeSlotsPerDay } = options;
   const traceId = makeTraceId("slots");
@@ -408,8 +392,7 @@ async function _listTimeSlotsV2({ serviceId, fromLocalDate, toLocalDate, resourc
   const p = (async () => {
     try {
       const resourceTypes = normalizedResourceIds.length ?
-        [{ resourceTypeId: STAFF_RESOURCE_TYPE_ID, resourceIds: normalizedResourceIds }] :
-        [];
+        [{ resourceTypeId: STAFF_RESOURCE_TYPE_ID, resourceIds: normalizedResourceIds }] : [];
       const payload = {
         serviceId: String(resolvedServiceId),
         fromLocalDate: String(fromKey),
@@ -462,9 +445,7 @@ async function _listTimeSlotsV2({ serviceId, fromLocalDate, toLocalDate, resourc
 
 // =============================================================================
 // BLOQUE 8 — BALANCEO POR CARGA HORARIA
-// [RES-04] Fix R2-18: Paginacion para > 1000 citas
 // =============================================================================
-
 async function _getBookedMinutesByResourceForDay(dateYMD, resourceIds, traceId) {
   const ymd = String(dateYMD || "").slice(0, 10);
   const ids = Array.isArray(resourceIds) ? resourceIds.map(String).filter(Boolean) : [];
@@ -487,7 +468,6 @@ async function _getBookedMinutesByResourceForDay(dateYMD, resourceIds, traceId) 
 
   if (res?.items) allItems = allItems.concat(res.items);
 
-  // [RES-04] Paginar si hay mas de 1000 citas
   while (res?.hasNext()) {
     res = await res.next().catch(() => null);
     if (res?.items) allItems = allItems.concat(res.items);
@@ -535,7 +515,6 @@ async function _pickLeastLoadedResource(candidateResourceIds, dateYMD, traceId) 
 // =============================================================================
 // BLOQUE 9 — NEXT SLOT (para F2 dual)
 // =============================================================================
-
 async function _findNextSlotForServiceInternal(serviceId, fromLocalDateTime, requiredResourceId, traceId, sameDayOnly = false) {
   const resolvedServiceId = await _resolveServiceIdInternal(serviceId);
   if (!resolvedServiceId) return { status: "ERROR", data: null, error: { code: "SERVICE_NOT_FOUND", message: "Service GUID not found" } };
@@ -568,9 +547,7 @@ async function _findNextSlotForServiceInternal(serviceId, fromLocalDateTime, req
 
 // =============================================================================
 // BLOQUE 10 — SLOTS DUALES CERTIFICADOS CON GAP
-// [RES-07] Gap que libera profesional durante exposureDuration
 // =============================================================================
-
 export async function _cleanExpiredDualSlotsInternal({ limit = 100, traceId = null } = {}) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 100));
   const now = new Date();
@@ -705,7 +682,6 @@ export async function _getCertifiedDualSlotsInternal(serviceId, resourceId, date
     };
     pairs.push(pair);
 
-    // Persistir en DualSlotCache con TTL 15 min
     try {
       await wixData.insert(DUAL_CACHE_COL, {
         _id: pairToken,
@@ -731,9 +707,7 @@ export async function _getCertifiedDualSlotsInternal(serviceId, resourceId, date
 
 // =============================================================================
 // BLOQUE 11 — REVALIDACION DE SLOT EXACTO
-// [RES-08] Revalidacion en tiempo real antes de Saga
 // =============================================================================
-
 export async function revalidateExactAvailabilitySlot({ serviceId, localStartDate, localEndDate, resourceId, nativeAddonIds = [], traceId }) {
   const activeTraceId = traceId || makeTraceId("exact-slot");
   const resolvedServiceId = await _resolveServiceIdInternal(serviceId);
@@ -840,7 +814,6 @@ export async function revalidateExactAvailabilitySlot({ serviceId, localStartDat
 // =============================================================================
 // BLOQUE 12 — INVALIDACION DE CACHES
 // =============================================================================
-
 export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, traceId) {
   const tId = traceId || makeTraceId("inv-cache");
   try {
@@ -873,9 +846,224 @@ export async function _invalidateCachesInternal(serviceId, dateYMD, resourceId, 
 }
 
 // =============================================================================
-// BLOQUE 13 — WEB METHODS PUBLICOS
+// BLOQUE 13 — [FIX A1] RESOLUCION DE STAFF PARA SLOT (IMPLEMENTACION COMPLETA)
 // =============================================================================
+/**
+ * Resuelve y valida el staff (resourceId) para un slot o par dual de slots.
+ * Revalida en tiempo real contra Wix Bookings V2 API (skipCache: true).
+ *
+ * @param {Object} params
+ * @param {string} params.serviceId - GUID del servicio F1
+ * @param {string} params.f1Start - ISO local start F1
+ * @param {string} params.f1End - ISO local end F1
+ * @param {string} [params.f2Start] - ISO local start F2 (si dual)
+ * @param {string} [params.f2End] - ISO local end F2 (si dual)
+ * @param {string} [params.requestedResourceId] - GUID solicitado por usuario
+ * @param {string} [params.traceId] - TraceId
+ * @returns {Promise<Object>} { status, data: { resourceId, slotF1, slotF2, isDual }, error }
+ */
+export async function _resolveStaffForSlotInternal({
+  serviceId,
+  f1Start,
+  f1End,
+  f2Start = null,
+  f2End = null,
+  requestedResourceId = null,
+  traceId = null,
+}) {
+  const activeTraceId = traceId || makeTraceId("resolve-staff");
+  const resolvedServiceId = await _resolveServiceIdInternal(serviceId);
 
+  if (!resolvedServiceId) {
+    return {
+      status: "ERROR",
+      data: null,
+      error: { code: "SERVICE_NOT_FOUND", message: "Service not found", traceId: activeTraceId },
+    };
+  }
+
+  const normF1Start = _normalizeLocalIsoStr(f1Start);
+  const normF1End = _normalizeLocalIsoStr(f1End);
+
+  if (!normF1Start || !normF1End) {
+    return {
+      status: "ERROR",
+      data: null,
+      error: { code: "INVALID_DATES", message: "F1 dates invalid", traceId: activeTraceId },
+    };
+  }
+
+  // 1. Revalidar slot F1 en tiempo real (skipCache: true)
+  const slotsF1 = await _listTimeSlotsV2(
+    {
+      serviceId: resolvedServiceId,
+      fromLocalDate: `${normF1Start.slice(0, 10)}T00:00:00`,
+      toLocalDate: `${normF1Start.slice(0, 10)}T23:59:59`,
+      resourceIds: requestedResourceId ? [requestedResourceId] : [],
+      nativeAddonIds: [],
+    },
+    { skipCache: true }
+  );
+
+  const slotF1 = (slotsF1 || []).find(
+    (s) =>
+      _normalizeLocalIsoStr(s.localStartDate) === normF1Start &&
+      _normalizeLocalIsoStr(s.localEndDate) === normF1End &&
+      s.bookable === true
+  );
+
+  if (!slotF1) {
+    return {
+      status: "ERROR",
+      data: null,
+      error: { code: "SLOT_UNAVAILABLE", message: "F1 slot no longer available", traceId: activeTraceId },
+    };
+  }
+
+  // 2. Extraer candidatos del slot F1
+  const candidateResourceIds = _getResourceIdsFromSlot(slotF1);
+
+  if (candidateResourceIds.length === 0) {
+    return {
+      status: "ERROR",
+      data: null,
+      error: { code: "STAFF_UNAVAILABLE", message: "No staff available for F1 slot", traceId: activeTraceId },
+    };
+  }
+
+  // 3. Si el usuario solicito un resourceId especifico, validarlo
+  if (requestedResourceId) {
+    if (!candidateResourceIds.includes(requestedResourceId)) {
+      return {
+        status: "ERROR",
+        data: null,
+        error: {
+          code: "STAFF_UNAVAILABLE",
+          message: "Requested staff not available for this slot",
+          traceId: activeTraceId,
+        },
+      };
+    }
+  }
+
+  // 4. Determinar si es dual
+  const serviceRes = await _getServiceBySlugOrIdInternal(resolvedServiceId, activeTraceId);
+  const serviceConfig = serviceRes?.data || {};
+  const isDual = serviceConfig.allowCombine === true && !!serviceConfig.linkedPhases;
+
+  let slotF2 = null;
+  let finalResourceId = requestedResourceId;
+
+  if (isDual) {
+    let normF2Start = _normalizeLocalIsoStr(f2Start);
+    let normF2End = _normalizeLocalIsoStr(f2End);
+
+    // Calcular SSOT si no se proporcionaron
+    if (!normF2Start || !normF2End) {
+      const f1EndUtc = getUtcDateFromMadridLocal(normF1End);
+      const exposureMs = Math.max(0, Number(serviceConfig.exposureDuration || 0)) * 60 * 1000;
+      const f2StartUtc = new Date(f1EndUtc.getTime() + exposureMs);
+      const phase2Ms = Math.max(0, Number(serviceConfig.phase2Duration || 30)) * 60 * 1000;
+      const f2EndUtc = new Date(f2StartUtc.getTime() + phase2Ms);
+
+      normF2Start = normF2Start || getMadridLocalStringNoZ(f2StartUtc);
+      normF2End = normF2End || getMadridLocalStringNoZ(f2EndUtc);
+    }
+
+    // Revalidar slot F2 en tiempo real
+    const slotsF2 = await _listTimeSlotsV2(
+      {
+        serviceId: serviceConfig.linkedPhases,
+        fromLocalDate: `${normF2Start.slice(0, 10)}T00:00:00`,
+        toLocalDate: `${normF2Start.slice(0, 10)}T23:59:59`,
+        resourceIds: requestedResourceId ? [requestedResourceId] : [],
+        nativeAddonIds: [],
+      },
+      { skipCache: true }
+    );
+
+    slotF2 = (slotsF2 || []).find(
+      (s) =>
+        _normalizeLocalIsoStr(s.localStartDate) === normF2Start &&
+        _normalizeLocalIsoStr(s.localEndDate) === normF2End &&
+        s.bookable === true
+    );
+
+    if (!slotF2) {
+      return {
+        status: "ERROR",
+        data: null,
+        error: { code: "SLOT_UNAVAILABLE", message: "F2 slot no longer available", traceId: activeTraceId },
+      };
+    }
+
+    // Validar que el mismo staff esta disponible en F2
+    const candidateResourceIdsF2 = _getResourceIdsFromSlot(slotF2);
+    const commonCandidates = candidateResourceIds.filter((id) => candidateResourceIdsF2.includes(id));
+
+    if (commonCandidates.length === 0) {
+      return {
+        status: "ERROR",
+        data: null,
+        error: {
+          code: "STAFF_UNAVAILABLE",
+          message: "No common staff available for both F1 and F2",
+          traceId: activeTraceId,
+        },
+      };
+    }
+
+    // 5. Si no hay resourceId solicitado, aplicar balanceo por carga
+    if (!finalResourceId) {
+      const dateYMD = normF1Start.slice(0, 10);
+      finalResourceId = await _pickLeastLoadedResource(commonCandidates, dateYMD, activeTraceId);
+    } else {
+      if (!commonCandidates.includes(finalResourceId)) {
+        return {
+          status: "ERROR",
+          data: null,
+          error: {
+            code: "STAFF_UNAVAILABLE",
+            message: "Requested staff not available for both phases",
+            traceId: activeTraceId,
+          },
+        };
+      }
+    }
+  } else {
+    // Servicio simple: aplicar balanceo si no hay resourceId solicitado
+    if (!finalResourceId) {
+      const dateYMD = normF1Start.slice(0, 10);
+      finalResourceId = await _pickLeastLoadedResource(candidateResourceIds, dateYMD, activeTraceId);
+    }
+  }
+
+  if (!finalResourceId) {
+    return {
+      status: "ERROR",
+      data: null,
+      error: { code: "STAFF_UNAVAILABLE", message: "Could not assign staff", traceId: activeTraceId },
+    };
+  }
+
+  return {
+    status: "SUCCESS",
+    data: {
+      resourceId: finalResourceId,
+      slotF1: _attachServiceId(slotF1, resolvedServiceId, activeTraceId, "resolveStaff:F1"),
+      slotF2: slotF2 ? _attachServiceId(slotF2, serviceConfig.linkedPhases, activeTraceId, "resolveStaff:F2") : null,
+      isDual,
+      serviceId: resolvedServiceId,
+      linkedPhases: isDual ? serviceConfig.linkedPhases : null,
+      dateYMD: normF1Start.slice(0, 10),
+    },
+    error: null,
+  };
+}
+
+// =============================================================================
+// BLOQUE 14 — WEB METHODS PUBLICOS
+// =============================================================================
 export const getServiceBySlugOrId = webMethod(Permissions.Anyone, async (slugOrId) => {
   const traceId = makeTraceId("wm-svc");
   try {
