@@ -2,10 +2,10 @@
 =============================================================================
 MODULE: backend/fiscalAggregator.web.js
 VERSION: v5002.2-FINAL
-BASE: BIBLIA v5002.5 + DOSSIER CAJA §29
-RESPONSIBILITY: Resúmenes fiscales trimestrales y extractos del ledger
+BASE: BIBLIA v5002.5 + DOSSIER CAJA S29
+RESPONSIBILITY: Resumenes fiscales trimestrales y extractos del ledger
  para reporting fiscal interno. Usa Stream Accumulator Pattern con
- paginación acotada.
+ paginacion acotada.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 =============================================================================
 */
@@ -25,7 +25,7 @@ const MAX_PAGES = SDK_CONFIG?.JOBS?.FISCAL_DAILY_MAX_PAGES || 50;
 const CMS_TIMEOUT_MS = Number(SDK_CONFIG?.TIMEOUTS?.CMS_MS) || 15000;
 
 // =============================================================================
-// BLOQUE 1 — HELPERS
+// BLOQUE 1 - HELPERS
 // =============================================================================
 
 function _rateLimitOrThrow(surface, key, traceId) {
@@ -176,7 +176,7 @@ async function _fetchQuarterMovements(months, options = {}) {
 }
 
 // =============================================================================
-// BLOQUE 2 — RESUMEN FISCAL TRIMESTRAL
+// BLOQUE 2 - RESUMEN FISCAL TRIMESTRAL
 // =============================================================================
 
 export async function getQuarterlyTaxSummaryInternal(year, quarter, options = {}) {
@@ -217,12 +217,12 @@ export async function getQuarterlyTaxSummaryInternal(year, quarter, options = {}
         estado: "REVISION_PROFESIONAL_REQUERIDA",
         baseImponibleRegistrada: _roundMoney(state.totalTaxableAmount),
         cuotaIvaRegistrada: _roundMoney(state.totalTaxAmount),
-        nota: "No es un Modelo 303 oficial. Requiere validación previa por gestoría.",
+        nota: "No es un Modelo 303 oficial. Requiere validacion previa por gestoria.",
       },
       borradorIngresos: {
         estado: "REVISION_PROFESIONAL_REQUERIDA",
         ingresosRegistrados: _roundMoney(state.totalTaxableAmount),
-        nota: "No es un Modelo 130 oficial. Requiere validación previa por gestoría.",
+        nota: "No es un Modelo 130 oficial. Requiere validacion previa por gestoria.",
       },
       totales: {
         totalVentasBrutas: _roundMoney(state.totalGrossSales),
@@ -259,7 +259,7 @@ export async function getQuarterlyTaxSummaryInternal(year, quarter, options = {}
 }
 
 // =============================================================================
-// BLOQUE 3 — LIBRO DE REGISTRO DE FACTURAS EXPEDIDAS
+// BLOQUE 3 - LIBRO DE REGISTRO DE FACTURAS EXPEDIDAS
 // =============================================================================
 
 export async function getLibroRegistroFacturasExpedidasInternal(year, quarter, options = {}) {
@@ -347,7 +347,7 @@ async function _getBusinessTaxId(traceId) {
 }
 
 // =============================================================================
-// BLOQUE 4 — WEB METHODS
+// BLOQUE 4 - WEB METHODS
 // =============================================================================
 
 export const getQuarterlyTaxSummary = webMethod(Permissions.SiteMember, async (year, quarter, options = {}) => {

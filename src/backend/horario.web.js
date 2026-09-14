@@ -48,7 +48,7 @@ const REGISTROS_COL = COLLECTIONS.REGISTROS_HORARIOS_STAFF;
 const MAPA_STAFF_COL = COLLECTIONS.MAPA_STAFF;
 
 // =============================================================================
-// BLOQUE 1 — HELPERS INTERNOS
+// BLOQUE 1 - HELPERS INTERNOS
 // =============================================================================
 
 function _getMadridNow() {
@@ -126,7 +126,7 @@ async function _resolveStaffContext(traceId) {
 }
 
 // =============================================================================
-// BLOQUE 2 — GET MY STAFF CONTEXT
+// BLOQUE 2 - GET MY STAFF CONTEXT
 // =============================================================================
 
 export const getMyStaffContext = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -151,7 +151,7 @@ export const getMyStaffContext = webMethod(Permissions.SiteMember, async (option
 });
 
 // =============================================================================
-// BLOQUE 3 — REGISTRAR FICHAJE
+// BLOQUE 3 - REGISTRAR FICHAJE
 // [HOR-01] Solo INSERT, nunca UPDATE
 // =============================================================================
 
@@ -247,7 +247,7 @@ export const registrarFichaje = webMethod(Permissions.SiteMember, async (options
 });
 
 // =============================================================================
-// BLOQUE 4 — GET ESTADO JORNADA
+// BLOQUE 4 - GET ESTADO JORNADA
 // =============================================================================
 
 export const getEstadoJornada = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -300,7 +300,7 @@ export const getEstadoJornada = webMethod(Permissions.SiteMember, async (options
 });
 
 // =============================================================================
-// BLOQUE 5 — CALCULAR HORAS TRABAJADAS
+// BLOQUE 5 - CALCULAR HORAS TRABAJADAS
 // =============================================================================
 
 export const calcularHorasTrabajadas = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -361,7 +361,7 @@ export const calcularHorasTrabajadas = webMethod(Permissions.SiteMember, async (
 });
 
 // =============================================================================
-// BLOQUE 6 — GET HISTORIAL FICHAJES
+// BLOQUE 6 - GET HISTORIAL FICHAJES
 // =============================================================================
 
 export const getHistorialFichajes = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -401,7 +401,7 @@ export const getHistorialFichajes = webMethod(Permissions.SiteMember, async (opt
 });
 
 // =============================================================================
-// BLOQUE 7 — REGISTRAR AJUSTE HORARIO (SOLO ADMIN)
+// BLOQUE 7 - REGISTRAR AJUSTE HORARIO (SOLO ADMIN)
 // [HOR-05] Ajustes solo por ADMIN con motivo obligatorio
 // =============================================================================
 
@@ -490,7 +490,7 @@ export const registrarAjusteHorario = webMethod(Permissions.Admin, async (option
 });
 
 // =============================================================================
-// BLOQUE 8 — GET RESUMEN HORAS
+// BLOQUE 8 - GET RESUMEN HORAS
 // =============================================================================
 
 export const getResumenHoras = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -567,7 +567,7 @@ export const getResumenHoras = webMethod(Permissions.SiteMember, async (options 
 });
 
 // =============================================================================
-// BLOQUE 9 — VALIDAR SOLAPAMIENTO DE HORARIOS
+// BLOQUE 9 - VALIDAR SOLAPAMIENTO DE HORARIOS
 // =============================================================================
 
 export async function _validateScheduleNoOverlap(resourceId, dayOfWeek, startTime, endTime, excludeId) {

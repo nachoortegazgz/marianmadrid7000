@@ -23,7 +23,7 @@ import { _toPublicError } from "backend/responseUtils";
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 — CHECK ADMIN ACCESS
+// BLOQUE 1 - CHECK ADMIN ACCESS
 // =============================================================================
 
 export const checkAdminAccess = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -41,7 +41,7 @@ export const checkAdminAccess = webMethod(Permissions.SiteMember, async (options
 });
 
 // =============================================================================
-// BLOQUE 2 — CHECK CAJERO ACCESS
+// BLOQUE 2 - CHECK CAJERO ACCESS
 // =============================================================================
 
 export const checkCajeroAccess = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -59,7 +59,7 @@ export const checkCajeroAccess = webMethod(Permissions.SiteMember, async (option
 });
 
 // =============================================================================
-// BLOQUE 3 — CHECK STAFF COLLABORATOR ACCESS
+// BLOQUE 3 - CHECK STAFF COLLABORATOR ACCESS
 // =============================================================================
 
 export const checkStaffCollaboratorAccess = webMethod(Permissions.SiteMember, async (options = {}) => {

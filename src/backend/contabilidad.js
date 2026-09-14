@@ -3,11 +3,11 @@
 MODULE: backend/contabilidad.js
 VERSION: v5007.3-FINAL
 BASE: BIBLIA v5002.5 Bloque 12 + DOSSIER CAJA Flujos 11-17
-RESPONSIBILITY: Proyección contable de movimientos de caja, asientos en
-                partida doble, libro mayor y conciliación contable.
+RESPONSIBILITY: Proyeccion contable de movimientos de caja, asientos en
+                partida doble, libro mayor y conciliacion contable.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 CORRECTIONS APPLIED:
-  [CONT-01] hashOrigen añadido en _buildBase.
+  [CONT-01] hashOrigen anadido en _buildBase.
   [CONT-02] await en hashChain y hmacSha256Hex.
 =============================================================================
 */
@@ -57,7 +57,7 @@ function _linePayload(line) {
 }
 
 // =============================================================================
-// CONSTRUCCIÓN DE LÍNEAS DE ASIENTO
+// CONSTRUCCION DE LINEAS DE ASIENTO
 // =============================================================================
 
 function _asAccountingLine(base, number, accountCode, accountName, debit, credit, tax) {
@@ -94,7 +94,7 @@ function _asAccountingLine(base, number, accountCode, accountName, debit, credit
 }
 
 // =============================================================================
-// BÚSQUEDA DE CUENTAS CONTABLES
+// BUSQUEDA DE CUENTAS CONTABLES
 // =============================================================================
 
 function _isApprovedMap(map) {
@@ -135,8 +135,8 @@ async function _insertLineIfMissing(line) {
 }
 
 // =============================================================================
-// CONSTRUCCIÓN DE BASE DE ASIENTO
-// [CONT-01] hashOrigen añadido
+// CONSTRUCCION DE BASE DE ASIENTO
+// [CONT-01] hashOrigen anadido
 // =============================================================================
 
 function _buildBase(movimiento) {
@@ -182,14 +182,14 @@ function _buildBase(movimiento) {
     integrityAlgorithmVersion: "HMAC_SHA256_V1",
     previousHash: _cleanText(movimiento?.hashCadena, 64),
     sourceHash: _cleanText(movimiento?.hashCadena, 64),
-    // [CONT-01] hashOrigen añadido
+    // [CONT-01] hashOrigen anadido
     hashOrigen: _cleanText(movimiento?.hashCadena, 64),
     traceId: _cleanText(movimiento?.traceId, 120),
   };
 }
 
 // =============================================================================
-// CONSTRUCCIÓN DE LÍNEAS DE ASIENTO
+// CONSTRUCCION DE LINEAS DE ASIENTO
 // =============================================================================
 
 function _buildLines(base, movimiento, map) {
@@ -215,16 +215,16 @@ function _buildLines(base, movimiento, map) {
     throw new Error("ACCOUNTING_PROJECTION_MISSING_VAT_ACCOUNT");
   }
   if (!isRefund) {
-    // Línea 1: Caja/Banco (Debe)
+    // Linea 1: Caja/Banco (Debe)
     lines.push(_asAccountingLine(base, 1, map.codigoCuentaDebePredeterminada, map.nombreCuentaDebePredeterminada, total, 0, null));
-    // Línea 2: Ingresos (Haber)
+    // Linea 2: Ingresos (Haber)
     lines.push(_asAccountingLine(base, 2, map.codigoCuentaHaberPredeterminada, map.nombreCuentaHaberPredeterminada, 0, net, baseTax));
-    // Línea 3: IVA (Haber)
+    // Linea 3: IVA (Haber)
     if (requiresVatLine) {
       lines.push(_asAccountingLine(base, 3, vatCode, vatName, 0, vat, baseTax));
     }
   } else {
-    // Devolución: invertir asientos
+    // Devolucion: invertir asientos
     lines.push(_asAccountingLine(base, 1, map.codigoCuentaHaberPredeterminada, map.nombreCuentaHaberPredeterminada, net, 0, baseTax));
     if (requiresVatLine) {
       lines.push(_asAccountingLine(base, 2, vatCode, vatName, vat, 0, baseTax));
@@ -241,7 +241,7 @@ function _buildLines(base, movimiento, map) {
 }
 
 // =============================================================================
-// FUNCIÓN PRINCIPAL: PROYECCIÓN CONTABLE
+// FUNCION PRINCIPAL: PROYECCION CONTABLE
 // =============================================================================
 
 /**
@@ -298,7 +298,7 @@ export async function projectLedgerMovementToAccounting(movimiento) {
 }
 
 /**
- * Verifica si un error es de proyección contable.
+ * Verifica si un error es de proyeccion contable.
  */
 export function isAccountingProjectionError(error) {
   return String(error?.message || error || "").startsWith("ACCOUNTING_PROJECTION_");

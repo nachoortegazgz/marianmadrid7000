@@ -6,8 +6,8 @@ BASE: BIBLIA v5002.5 + DOSSIER CAJA
 CORRECTIONS APPLIED:
   [M365-01] desiredPayload en INSERT de M365GraphSyncQueue (antes payload).
   [M365-02] Lectura correcta de desiredPayload en procesamiento.
-  [M365-03] Máquina de estados con RECOVERABLE/NO_RECOVERABLE.
-  [M365-04] Lock distribuido con expiración.
+  [M365-03] Maquina de estados con RECOVERABLE/NO_RECOVERABLE.
+  [M365-04] Lock distribuido con expiracion.
 =============================================================================
 */
 
@@ -28,7 +28,7 @@ const MAX_BACKOFF_MS = 3600000;
 const LOCK_EXPIRY_MS = 900000;
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 
-// [M365-03] Estados de máquina de estados
+// [M365-03] Estados de maquina de estados
 const STATES = {
   PENDING: "PENDING",
   PROCESSING: "PROCESSING",
@@ -37,7 +37,7 @@ const STATES = {
   RETRY: "RETRY",
 };
 
-// [M365-03] Clasificación de errores
+// [M365-03] Clasificacion de errores
 const RECOVERABLE_ERRORS = [
   "M365_GRAPH_TOKEN_FAILED",
   "M365_GRAPH_POST_FAILED",
@@ -152,7 +152,7 @@ export async function enqueueM365LedgerRecord(movement, traceId) {
   const queueId = _queueId(payload);
   const queue = {
     _id: queueId,
-    // [M365-01] Campo canónico: desiredPayload
+    // [M365-01] Campo canonico: desiredPayload
     desiredPayload: payload,
     payloadHash: payload.integrityHash,
     status: STATES.PENDING,
@@ -195,7 +195,7 @@ export async function processM365GraphSyncQueue(options = {}) {
 
   for (const queue of pending.items) {
     try {
-      // [M365-02] Leer desiredPayload (campo canónico)
+      // [M365-02] Leer desiredPayload (campo canonico)
       const payload = queue.desiredPayload || queue.payload;
       const postResult = await _postListItem(config, token, payload);
 
