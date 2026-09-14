@@ -2,7 +2,7 @@
 =============================================================================
 MODULE: backend/facturasRecibidas.web.js
 VERSION: v5007.3-FINAL (D2/D3 integrado)
-BASE: DOSSIER CAJA §17 + BIBLIA v5002.5 + ESQUEMA CMS 4.22
+BASE: DOSSIER CAJA S17 + BIBLIA v5002.5 + ESQUEMA CMS 4.22
 RESPONSIBILITY: Registro de facturas recibidas de proveedores.
                 Genera asiento contable y actualiza LibroIVAFacturasRecibidas.
                 Valida NIF proveedor, base, cuota y tipo impositivo.

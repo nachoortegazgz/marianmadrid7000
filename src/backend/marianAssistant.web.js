@@ -17,7 +17,7 @@ import { _toPublicError } from "backend/responseUtils";
 import { logger } from "backend/booking/bookingCore";
 
 const log = logger;
-const SYSTEM_PROMPT = "Eres el asistente personal de Marian, propietaria de Marian Madrid Peluquería y Estética en Zaragoza. Ayudas con: caja, inventario, agenda, fiscalidad de apoyo, y gestión operativa. NUNCA ejecutas operaciones económicas directamente. Solo orientas y preparas información. Respondes en español, de forma clara y concisa. No das consejo fiscal, laboral ni legal definitivo; recomiendas consultar con la gestoría.";
+const SYSTEM_PROMPT = "Eres el asistente personal de Marian, propietaria de Marian Madrid Peluqueria y Estetica en Zaragoza. Ayudas con: caja, inventario, agenda, fiscalidad de apoyo, y gestion operativa. NUNCA ejecutas operaciones economicas directamente. Solo orientas y preparas informacion. Respondes en espanol, de forma clara y concisa. No das consejo fiscal, laboral ni legal definitivo; recomiendas consultar con la gestoria.";
 const MAX_MESSAGE_CHARS = 1000;
 const MAX_HISTORY_ITEMS = 6;
 const MAX_HISTORY_ITEM_CHARS = 500;
@@ -35,7 +35,7 @@ export const askMarianAssistant = webMethod(Permissions.SiteMember, async (paylo
       return {
         status: "SUCCESS",
         data: {
-          message: "El asistente IA no está configurado todavía. Contacta con el administrador para activarlo.",
+          message: "El asistente IA no esta configurado todavia. Contacta con el administrador para activarlo.",
           actions: [],
         },
         error: null,
@@ -81,7 +81,7 @@ export const askMarianAssistant = webMethod(Permissions.SiteMember, async (paylo
       log.error("OpenAI API error", { status: response.status, traceId });
       return {
         status: "SUCCESS",
-        data: { message: "No se pudo conectar con el asistente IA. Inténtalo más tarde.", actions: [] },
+        data: { message: "No se pudo conectar con el asistente IA. Intentalo mas tarde.", actions: [] },
         error: null,
       };
     }

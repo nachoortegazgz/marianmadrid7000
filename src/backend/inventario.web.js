@@ -55,7 +55,7 @@ const MOVIMIENTOS_INV_COL = COLLECTIONS.MOVIMIENTOS_INVENTARIO;
 const CIERRE_INV_COL = COLLECTIONS.INVENTARIO_STOCK_VENTA_CIERRE;
 
 // =============================================================================
-// BLOQUE 1 — GET INVENTORY DASHBOARD
+// BLOQUE 1 - GET INVENTORY DASHBOARD
 // =============================================================================
 
 export const getInventoryDashboard = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -101,7 +101,7 @@ export const getInventoryDashboard = webMethod(Permissions.SiteMember, async (op
 });
 
 // =============================================================================
-// BLOQUE 2 — GET INVENTORY RECONCILIATION QUEUE
+// BLOQUE 2 - GET INVENTORY RECONCILIATION QUEUE
 // =============================================================================
 
 export const getInventoryReconciliationQueue = webMethod(Permissions.SiteMember, async (options = {}) => {
@@ -129,7 +129,7 @@ export const getInventoryReconciliationQueue = webMethod(Permissions.SiteMember,
 });
 
 // =============================================================================
-// BLOQUE 3 — RECORD INVENTORY MOVEMENT SAFE
+// BLOQUE 3 - RECORD INVENTORY MOVEMENT SAFE
 // [INV-01] movementToken como clave de idempotencia
 // =============================================================================
 
@@ -222,7 +222,7 @@ export async function recordInventoryMovementSafe(sku, movementType, quantity, m
 }
 
 // =============================================================================
-// BLOQUE 4 — RECORD ONLINE INVENTORY ORDER
+// BLOQUE 4 - RECORD ONLINE INVENTORY ORDER
 // [INV-04] Llamado desde events.js wixEcom_onOrderPaymentStatusUpdated
 // =============================================================================
 
@@ -261,7 +261,7 @@ export async function recordOnlineInventoryOrderInternal(order, traceId) {
 }
 
 // =============================================================================
-// BLOQUE 5 — RECORD ONLINE INVENTORY REFUND
+// BLOQUE 5 - RECORD ONLINE INVENTORY REFUND
 // [INV-05] Llamado desde events.js wixEcom_onOrderRefunded
 // =============================================================================
 
@@ -303,8 +303,8 @@ export async function recordOnlineInventoryRefundInternal(order, refundObj, rest
 }
 
 // =============================================================================
-// BLOQUE 6 — [FIX-C3] GENERAR CIERRE DE INVENTARIO VALORADO
-// DOSSIER CAJA §20 — Fotografia valorada del inventario al cierre de ejercicio
+// BLOQUE 6 - [FIX-C3] GENERAR CIERRE DE INVENTARIO VALORADO
+// DOSSIER CAJA S20 - Fotografia valorada del inventario al cierre de ejercicio
 // =============================================================================
 
 export const generateInventoryClosing = webMethod(Permissions.Admin, async (options = {}) => {
@@ -436,7 +436,7 @@ export const generateInventoryClosing = webMethod(Permissions.Admin, async (opti
 });
 
 // =============================================================================
-// BLOQUE 7 — [FIX-C3] LISTAR CIERRES DE INVENTARIO
+// BLOQUE 7 - [FIX-C3] LISTAR CIERRES DE INVENTARIO
 // =============================================================================
 
 export const listInventoryClosings = webMethod(Permissions.SiteMember, async (options = {}) => {

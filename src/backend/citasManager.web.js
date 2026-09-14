@@ -6,10 +6,10 @@ BASE: BIBLIA v5002.5 Bloque 12.4 + MOTOR DE RESERVAS + DIRECTRICES V19
 CORRECTIONS APPLIED:
   [CM-01] Nomenclatura v19.6: serviceId, linkedPhases, resourceId.
   [CM-02] Idempotencia por pairToken en processDualBooking.
-  [CM-03] Validación de orden pagada antes de confirmar pago.
+  [CM-03] Validacion de orden pagada antes de confirmar pago.
   [CM-04] _assertBookingOwner verifica propiedad de la cita.
-  [CM-05] Reprogramación dual con revalidación de slots.
-  [CM-06] _buildDualRescheduleSlot usa linkedPhases (no secondaryServiceGuid).
+  [CM-05] Reprogramacion dual con revalidacion de slots.
+  [CM-06] _buildDualRescheduleSlot usa linkedPhases (campo canonico v5002.5).
 =============================================================================
 */
 
@@ -132,8 +132,8 @@ export const processDualBooking = webMethod(Permissions.Anyone, async (unsafePay
 });
 
 // ============================================================================
-// CONFIRMACIÓN DE PAGO
-// [CM-03] Validación de orden pagada antes de confirmar
+// CONFIRMACION DE PAGO
+// [CM-03] Validacion de orden pagada antes de confirmar
 // ============================================================================
 
 function _isPaidOrderStatus(value) {
@@ -288,7 +288,7 @@ export const confirmPayment = webMethod(Permissions.Anyone, async (payload) => {
 });
 
 // ============================================================================
-// REPROGRAMACIÓN DE RESERVA SIMPLE
+// REPROGRAMACION DE RESERVA SIMPLE
 // ============================================================================
 
 export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bookingId, newSlot, revision) => {
@@ -352,8 +352,8 @@ export const rescheduleExistingBooking = webMethod(Permissions.Anyone, async (bo
 });
 
 // ============================================================================
-// REPROGRAMACIÓN DUAL
-// [CM-05] Revalidación de slots
+// REPROGRAMACION DUAL
+// [CM-05] Revalidacion de slots
 // [CM-06] _buildDualRescheduleSlot usa linkedPhases
 // ============================================================================
 
@@ -384,10 +384,10 @@ function _getBookingSlotFromCita(cita) {
   };
 }
 
-// [CM-06] Usa linkedPhases (no secondaryServiceGuid)
+// [CM-06] Usa linkedPhases (campo canonico v5002.5)
 async function _buildDualRescheduleSlot(serviceConfig, inputSlot, expectedServiceId) {
-  // [CM-06] Campo canónico: linkedPhases
-  const linkedServiceId = _safeTrim(serviceConfig?.linkedPhases || serviceConfig?.secondaryServiceGuid || "");
+  // [CM-06] Campo canonico: linkedPhases
+  const linkedServiceId = _safeTrim(serviceConfig?.linkedPhases || "");
 
   if (!linkedServiceId || linkedServiceId !== expectedServiceId) {
     return null;

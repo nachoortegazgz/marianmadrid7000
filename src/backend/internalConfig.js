@@ -18,7 +18,7 @@ CORRECTIONS APPLIED:
 */
 
 // =============================================================================
-// BLOQUE 1 — STAFF ACTIVO (SSOT MapaStaff)
+// BLOQUE 1 - STAFF ACTIVO (SSOT MapaStaff)
 // =============================================================================
 export const STAFF = Object.freeze({
   IDS: Object.freeze([
@@ -34,7 +34,7 @@ export const STAFF = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 2 — COLECCIONES CMS CANONICAS (32 + 1 auxiliar)
+// BLOQUE 2 - COLECCIONES CMS CANONICAS (32 + 1 auxiliar)
 // =============================================================================
 export const COLLECTIONS = Object.freeze({
   CATEGORIAS_SERVICIO: "CategoriasServicio",
@@ -74,7 +74,7 @@ export const COLLECTIONS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 3 — WIX APP IDs
+// BLOQUE 3 - WIX APP IDs
 // =============================================================================
 export const APP_IDS = Object.freeze({
   BOOKINGS: "13d21c63-b5ec-5912-8397-c3a5ddb27a97",
@@ -87,7 +87,7 @@ export const APP_IDS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 4 — API KEYS Y RECURSOS WIX NATIVOS
+// BLOQUE 4 - API KEYS Y RECURSOS WIX NATIVOS
 // =============================================================================
 export const API = Object.freeze({
   STAFF_RESOURCE_TYPE_ID: "1cd44cf8-756f-41c3-bd90-3e2ffcaf1155",
@@ -95,14 +95,14 @@ export const API = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 5 — SINGLETONS PROTEGIDOS
+// BLOQUE 5 - SINGLETONS PROTEGIDOS
 // =============================================================================
 export const SINGLETONS = Object.freeze({
   CAJA: "CAJA_PRINCIPAL",
 });
 
 // =============================================================================
-// BLOQUE 6 — CONFIGURACION GLOBAL DEL SDK
+// BLOQUE 6 - CONFIGURACION GLOBAL DEL SDK
 // =============================================================================
 export const SDK_CONFIG = Object.freeze({
   TZ: "Europe/Madrid",
@@ -182,7 +182,7 @@ export const SDK_CONFIG = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 7 — CONCURRENCIA, LOCKS Y TRANSACCIONES
+// BLOQUE 7 - CONCURRENCIA, LOCKS Y TRANSACCIONES
 // =============================================================================
 export const CONCURRENCY = Object.freeze({
   MUTEX_TTL_MS: 300000,
@@ -197,7 +197,7 @@ export const CONCURRENCY = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 8 — ENUMS DE NEGOCIO
+// BLOQUE 8 - ENUMS DE NEGOCIO
 // =============================================================================
 export const TIPO_FICHAJE = Object.freeze({
   ENTRADA: "ENTRADA",
@@ -273,7 +273,7 @@ export const COLLAB_ROLES = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 9 — CONSTANTES DE CATALOGO Y BUSQUEDA DE SLOTS
+// BLOQUE 9 - CONSTANTES DE CATALOGO Y BUSQUEDA DE SLOTS
 // =============================================================================
 export const SERVICE_CATALOG = Object.freeze({
   STATES: Object.freeze({
@@ -302,7 +302,7 @@ export const BOOKINGS_ADDON_CONFIG = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 10 — JWT Y SEGURIDAD
+// BLOQUE 10 - JWT Y SEGURIDAD
 // =============================================================================
 export const JWT = Object.freeze({
   ALGORITHM: "HS256",
@@ -310,7 +310,7 @@ export const JWT = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 11 — CAMPOS DE CITA
+// BLOQUE 11 - CAMPOS DE CITA
 // =============================================================================
 export const CITA_FIELDS = Object.freeze({
   STATUS: "status",
@@ -326,7 +326,7 @@ export const CITA_FIELDS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 12 — ACCESO Y ROLES
+// BLOQUE 12 - ACCESO Y ROLES
 // =============================================================================
 export const STAFF_ACCESS = Object.freeze({
   ALLOWED_ROLES: Object.freeze(["ADMIN", "GESTION", "ESTILISTA"]),
@@ -334,7 +334,7 @@ export const STAFF_ACCESS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 13 — DINERO Y TEXTO POR DEFECTO
+// BLOQUE 13 - DINERO Y TEXTO POR DEFECTO
 // =============================================================================
 export const MONEY = Object.freeze({
   DISPLAY_CURRENCY: "EUR",
@@ -344,7 +344,7 @@ export const MONEY = Object.freeze({
 export const STAFF_DEFAULT_NAME = "Profesional";
 
 // =============================================================================
-// BLOQUE 14 — IDENTIDADES LEGACY PROHIBIDAS
+// BLOQUE 14 - IDENTIDADES LEGACY PROHIBIDAS
 // =============================================================================
 export const FORBIDDEN_LEGACY_IDS = Object.freeze({
   primaryServiceGuid: "serviceId",
@@ -360,7 +360,7 @@ export const FORBIDDEN_LEGACY_IDS = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 15 — [FIX-D4] VALIDACION DE ACTIVE_NATIVE_IDS
+// BLOQUE 15 - [FIX-D4] VALIDACION DE ACTIVE_NATIVE_IDS
 // =============================================================================
 export function validateActiveNativeAddonIds() {
   const ids = BOOKINGS_ADDON_CONFIG.ACTIVE_NATIVE_IDS;

@@ -2,17 +2,17 @@
 =============================================================================
 MODULE: backend/staff.js
 VERSION: v5007.3-FINAL
-BASE: BIBLIA v5002.5 Bloque 12.11 + ESQUEMA CMS v5002.5 Sección 4.03
-RESPONSIBILITY: Catálogo de personal con búsqueda O(1) por cualquier
+BASE: BIBLIA v5002.5 Bloque 12.11 + ESQUEMA CMS v5002.5 Seccion 4.03
+RESPONSIBILITY: Catalogo de personal con busqueda O(1) por cualquier
                 identificador (clave, email, nombre, resourceId, scheduleId).
-                Caché en memoria con TTL configurable.
+                Cache en memoria con TTL configurable.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 CORRECTIONS APPLIED:
-  [STF-01] Caché con TTL de SDK_CONFIG.CACHE.STAFF_TTL_MS (300s).
-  [STF-02] Búsqueda O(1) mediante índices Map por resourceId, email, scheduleId.
-  [STF-03] clearStaffCache() para invalidación manual tras cambios en MapaStaff.
+  [STF-01] Cache con TTL de SDK_CONFIG.CACHE.STAFF_TTL_MS (300s).
+  [STF-02] Busqueda O(1) mediante indices Map por resourceId, email, scheduleId.
+  [STF-03] clearStaffCache() para invalidacion manual tras cambios en MapaStaff.
   [STF-04] getStaffDisplayName() con fallback a STAFF_DEFAULT_NAME.
-  [STF-05] getStaffScheduleId() para resolución de scheduleId en bookingCore.
+  [STF-05] getStaffScheduleId() para resolucion de scheduleId en bookingCore.
 =============================================================================
 */
 
@@ -27,23 +27,23 @@ const STAFF_CACHE_TTL_MS = SDK_CONFIG?.CACHE?.STAFF_TTL_MS || 300000;
 let staffCache = null; // { data: Map[], timestamp: number }
 
 /**
- * Limpia la caché de staff. Llamar tras modificaciones en MapaStaff.
+ * Limpia la cache de staff. Llamar tras modificaciones en MapaStaff.
  */
 export function clearStaffCache() {
   staffCache = null;
 }
 
 // =============================================================================
-// BLOQUE 1 — CARGA DEL CATÁLOGO
+// BLOQUE 1 - CARGA DEL CATALOGO
 // =============================================================================
 
 /**
- * Carga el catálogo completo de staff desde MapaStaff.
- * Construye índices Map para búsqueda O(1).
+ * Carga el catalogo completo de staff desde MapaStaff.
+ * Construye indices Map para busqueda O(1).
  */
 async function _loadStaffCatalog() {
   const now = Date.now();
-  // Verificar caché vigente
+  // Verificar cache vigente
   if (staffCache && now - staffCache.timestamp < STAFF_CACHE_TTL_MS) {
     return staffCache.data;
   }
@@ -54,7 +54,7 @@ async function _loadStaffCatalog() {
       .limit(100)
       .find({ suppressAuth: true });
     const items = res?.items || [];
-    // Construir índices
+    // Construir indices
     const byResourceId = new Map();
     const byEmail = new Map();
     const byScheduleId = new Map();
@@ -91,14 +91,14 @@ async function _loadStaffCatalog() {
     return catalog;
   } catch (err) {
     log.error("_loadStaffCatalog failed", { error: err?.message });
-    // Retornar caché anterior si existe, aunque esté expirada
+    // Retornar cache anterior si existe, aunque este expirada
     if (staffCache) return staffCache.data;
     return { all: [], byResourceId: new Map(), byEmail: new Map(), byScheduleId: new Map(), byId: new Map() };
   }
 }
 
 // =============================================================================
-// BLOQUE 2 — FUNCIONES DE BÚSQUEDA
+// BLOQUE 2 - FUNCIONES DE BUSQUEDA
 // =============================================================================
 
 /**
@@ -112,7 +112,7 @@ export async function getAllStaff() {
 /**
  * Busca un miembro de staff por cualquier identificador.
  * Acepta: resourceId (GUID), email, scheduleId, _id de CMS, nombre.
- * Búsqueda O(1) para GUIDs, emails y scheduleIds.
+ * Busqueda O(1) para GUIDs, emails y scheduleIds.
  */
 export async function findStaff(identifier) {
   const raw = _safeTrim(identifier);
@@ -131,7 +131,7 @@ export async function findStaff(identifier) {
   const emailLower = raw.toLowerCase();
   const byEmail = catalog.byEmail.get(emailLower);
   if (byEmail) return byEmail;
-  // 3. Buscar por nombre (fallback lineal, solo si no se encontró por índices)
+  // 3. Buscar por nombre (fallback lineal, solo si no se encontro por indices)
   const nameLower = raw.toLowerCase();
   for (const record of catalog.all) {
     if (record.displayName.toLowerCase() === nameLower) {
@@ -142,7 +142,7 @@ export async function findStaff(identifier) {
 }
 
 /**
- * Busca staff por resourceId específico.
+ * Busca staff por resourceId especifico.
  */
 export async function findStaffByResourceId(resourceId) {
   const raw = _safeTrim(resourceId);

@@ -1055,7 +1055,7 @@ export async function verifyFiscalHashChainIntegrity(options = {}) {
 }
 
 // ============================================================================
-// [C1] FLUJO 7 — TARJETAS REGALO
+// [C1] FLUJO 7 - TARJETAS REGALO
 // ============================================================================
 
 export const registerGiftCardSale = webMethod(Permissions.SiteMember, async (payload) => {

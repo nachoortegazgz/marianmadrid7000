@@ -4,12 +4,12 @@ MODULE: backend/security.js
 VERSION: v5007.3-FINAL (FIX B1 aplicado)
 BASE: BIBLIA v5002.5 Bloque 12.8 + DIRECTRICES V19
 RESPONSIBILITY: Motor de seguridad. Rate limiter con ventana deslizante,
-                verificación de roles (ADMIN, CAJERO, ESTILISTA) y bloqueo
+                verificacion de roles (ADMIN, CAJERO, ESTILISTA) y bloqueo
                 persistente cross-instancia en RateLimitBlocks.
 STANDARDS: G10 ASCII Strict (0 non-ASCII characters).
 CORRECTIONS APPLIED:
   [FIX B1] rateLimiter() activa registerPersistentBlock() cuando se excede
-           3x el límite. Bloqueo persistente de 1 hora en RateLimitBlocks.
+           3x el limite. Bloqueo persistente de 1 hora en RateLimitBlocks.
 =============================================================================
 */
 
@@ -22,8 +22,8 @@ import { logger } from "backend/logger";
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 — RATE LIMITER (VENTANA DESLIZANTE + BLOQUEO PERSISTENTE)
-// [FIX B1] Activar registerPersistentBlock cuando se exceda 3x el límite
+// BLOQUE 1 - RATE LIMITER (VENTANA DESLIZANTE + BLOQUEO PERSISTENTE)
+// [FIX B1] Activar registerPersistentBlock cuando se exceda 3x el limite
 // =============================================================================
 
 const rateLimitCache = new Map();
@@ -64,10 +64,10 @@ function _cleanupRateLimitCache() {
 
 /**
  * Rate limiter con ventana deslizante + bloqueo persistente cross-instancia.
- * [FIX B1] Cuando se excede 3x el límite, se registra bloqueo persistente de 1h.
+ * [FIX B1] Cuando se excede 3x el limite, se registra bloqueo persistente de 1h.
  *
  * @param {Object} options - { surface, key }
- * @param {number} maxRequests - Límite por ventana (opcional)
+ * @param {number} maxRequests - Limite por ventana (opcional)
  * @param {number} windowMs - Ventana en ms (opcional)
  * @returns {Object} { allowed: boolean, retryAfter: number, persistentBlock: boolean }
  */
@@ -90,7 +90,7 @@ export function rateLimiter({ surface, key }, maxRequests, windowMs) {
   // Filtrar timestamps fuera de la ventana
   const windowStart = now - window;
   entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart);
-  // [FIX B1] Umbral de bloqueo persistente: 3x el límite
+  // [FIX B1] Umbral de bloqueo persistente: 3x el limite
   const persistentThreshold = max * PERSISTENT_BLOCK_THRESHOLD_MULTIPLIER;
   if (entry.timestamps.length >= max) {
     // [FIX B1] Si supera el umbral persistente, registrar bloqueo
@@ -121,8 +121,8 @@ export function rateLimiter({ surface, key }, maxRequests, windowMs) {
 }
 
 /**
- * Verifica si una clave está bloqueada persistentemente en el CMS.
- * Se llama al inicio de cada webMethod crítico para detectar abusos cross-instancia.
+ * Verifica si una clave esta bloqueada persistentemente en el CMS.
+ * Se llama al inicio de cada webMethod critico para detectar abusos cross-instancia.
  */
 export async function isKeyPersistentlyBlocked(surface, key) {
   try {
@@ -166,7 +166,7 @@ export async function registerPersistentBlock(surface, key, durationMs, traceId)
 }
 
 // =============================================================================
-// BLOQUE 2 — VERIFICACIÓN DE ROLES
+// BLOQUE 2 - VERIFICACION DE ROLES
 // =============================================================================
 
 async function _getCurrentMemberInfo() {

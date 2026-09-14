@@ -1,6 +1,16 @@
-# dependencies
+```
+# Dependencies
 node_modules/
-.vscode/
-.idea/
-.wix/
-jsconfig.json
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Package lock file (already in changes)
+package-lock.json
+```

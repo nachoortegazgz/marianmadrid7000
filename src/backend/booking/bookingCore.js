@@ -53,7 +53,7 @@ import {
 const log = logger;
 
 // =============================================================================
-// BLOQUE 1 — CODIGOS DE ERROR (25 codigos)
+// BLOQUE 1 - CODIGOS DE ERROR (25 codigos)
 // =============================================================================
 
 export const ERROR_CODES = Object.freeze({
@@ -85,7 +85,7 @@ export const ERROR_CODES = Object.freeze({
 });
 
 // =============================================================================
-// BLOQUE 2 — ELEVATED PROXIES (Bookings V2 + eCommerce)
+// BLOQUE 2 - ELEVATED PROXIES (Bookings V2 + eCommerce)
 // =============================================================================
 
 export const createBookingElevated = elevate(bookings.createBooking);
@@ -97,7 +97,7 @@ export const createCheckoutElevated = elevate(checkout.createCheckout);
 export const getCheckoutUrlElevated = elevate(checkout.getCheckoutUrl);
 
 // =============================================================================
-// BLOQUE 3 — CLASE BOOKINGERROR
+// BLOQUE 3 - CLASE BOOKINGERROR
 // =============================================================================
 
 export class BookingError extends Error {
@@ -116,7 +116,7 @@ export function createBookingError(code, message, details) {
 }
 
 // =============================================================================
-// BLOQUE 4 — NORMALIZACION DE ERRORES
+// BLOQUE 4 - NORMALIZACION DE ERRORES
 // =============================================================================
 
 export function normalizeError(err) {
@@ -172,7 +172,7 @@ export function _handleError(error, context, traceId, logFn) {
 }
 
 // =============================================================================
-// BLOQUE 5 — RESOLUCION DE SCHEDULEID (FALLBACK CONTROLADO)
+// BLOQUE 5 - RESOLUCION DE SCHEDULEID (FALLBACK CONTROLADO)
 // =============================================================================
 
 async function _resolveScheduleIdByResourceId(resourceId) {
@@ -183,7 +183,7 @@ async function _resolveScheduleIdByResourceId(resourceId) {
 }
 
 // =============================================================================
-// BLOQUE 6 — NORMALIZACION DE SLOTS PARA WRITER V2
+// BLOQUE 6 - NORMALIZACION DE SLOTS PARA WRITER V2
 // =============================================================================
 
 function _normalizeSlotShape(slot) {
@@ -193,14 +193,14 @@ function _normalizeSlotShape(slot) {
 
 /**
  * Sanitiza un slot al formato exacto requerido por Wix Bookings Writer V2.
- * Usa serviceId canonico (no primaryServiceGuid).
+ * Usa serviceId canonico (identidad v5002.5).
  * @returns {Object|null} Slot pristino o null si invalido
  */
 export async function _forceStaffInPristineSlot(slot, resourceId, serviceIdOverride, defaultDurationMinutes) {
   const s = _normalizeSlotShape(slot);
   if (!s) return null;
 
-  const serviceId = _safeTrim(serviceIdOverride || s.serviceId || s.primaryServiceGuid);
+  const serviceId = _safeTrim(serviceIdOverride || s.serviceId );
   if (!serviceId || !_looksLikeGuid(serviceId)) {
     log.error("_forceStaffInPristineSlot: invalid serviceId", { serviceId });
     return null;
@@ -296,7 +296,7 @@ export async function _forceStaffInPristineSlot(slot, resourceId, serviceIdOverr
 }
 
 // =============================================================================
-// BLOQUE 7 — CHECKOUT URL HELPER
+// BLOQUE 7 - CHECKOUT URL HELPER
 // =============================================================================
 
 export function _extractCheckoutId(checkoutSession) {
@@ -322,7 +322,7 @@ export async function getCheckoutUrlSafe(checkoutSessionOrId) {
 }
 
 // =============================================================================
-// BLOQUE 8 — MUTEX LOCKS (SlotLocks)
+// BLOQUE 8 - MUTEX LOCKS (SlotLocks)
 // =============================================================================
 
 const MUTEX_TTL_MS = Number(CONCURRENCY?.MUTEX_TTL_MS) || 300000;
@@ -438,7 +438,7 @@ export async function _renewLock(slotClave, lockOwnerId, ttlMs) {
 }
 
 // =============================================================================
-// BLOQUE 9 — SLOT KEYS
+// BLOQUE 9 - SLOT KEYS
 // =============================================================================
 
 export function _generateSlotKey(serviceId, resourceId, startDate, endDate) {
@@ -458,14 +458,14 @@ export function _generateSlotKey(serviceId, resourceId, startDate, endDate) {
 export function _buildLockKeys(phases, resourceId) {
   const keys = (phases || []).map((p) => {
     const slot = p?.rawSlot || {};
-    return _generateSlotKey(slot.serviceId || slot.primaryServiceGuid, resourceId, p.localStart, p.localEnd);
+    return _generateSlotKey(slot.serviceId , resourceId, p.localStart, p.localEnd);
   });
 
   return Array.from(new Set(keys)).sort();
 }
 
 // =============================================================================
-// BLOQUE 10 — TRANSACCIONES IDEMPOTENTES (BookingTransactions)
+// BLOQUE 10 - TRANSACCIONES IDEMPOTENTES (BookingTransactions)
 // =============================================================================
 
 const TRANSACTIONS_COL = COLLECTIONS.BOOKING_TRANSACTIONS;
@@ -585,7 +585,7 @@ export async function _failTransaction(pairToken, errorMessage) {
 }
 
 // =============================================================================
-// BLOQUE 11 — PERSISTENCIA EN CITAS_F2
+// BLOQUE 11 - PERSISTENCIA EN CITAS_F2
 // [FIX B2] Garantiza meta como OBJECT nativo (nunca string)
 // =============================================================================
 
@@ -693,7 +693,7 @@ export async function _persistBooking(params, traceId) {
 }
 
 // =============================================================================
-// BLOQUE 12 — ACTUALIZACION SEGURA DE CITA
+// BLOQUE 12 - ACTUALIZACION SEGURA DE CITA
 // =============================================================================
 
 export async function _updateCitaSafe(bookingId, updater, traceId, operation) {
@@ -728,7 +728,7 @@ export async function _updateCitaSafe(bookingId, updater, traceId, operation) {
 }
 
 // =============================================================================
-// BLOQUE 13 — DUAL CACHE
+// BLOQUE 13 - DUAL CACHE
 // =============================================================================
 
 const DUAL_CACHE_COL = COLLECTIONS.DUAL_SLOT_CACHE;
@@ -753,7 +753,7 @@ export async function _getDualPairFromCache(pairToken, traceId) {
 }
 
 // =============================================================================
-// BLOQUE 14 — HELPERS DE ADDONS
+// BLOQUE 14 - HELPERS DE ADDONS
 // =============================================================================
 
 export function _normalizeAddons(addons) {
@@ -771,7 +771,7 @@ export function _sumAddons(addons) {
 }
 
 // =============================================================================
-// BLOQUE 15 — EXTRACCION DE RESOURCEIDS DESDE SLOTS
+// BLOQUE 15 - EXTRACCION DE RESOURCEIDS DESDE SLOTS
 // =============================================================================
 
 export function _extractResourceIdsFromSlot(slot) {
@@ -800,7 +800,7 @@ export function _extractResourceIdsFromSlot(slot) {
 }
 
 // =============================================================================
-// BLOQUE 16 — VALIDACION DE GUID
+// BLOQUE 16 - VALIDACION DE GUID
 // =============================================================================
 
 export function isValidGuid(id) {
@@ -808,7 +808,7 @@ export function isValidGuid(id) {
 }
 
 // =============================================================================
-// BLOQUE 17 — [FIX A3] VERIFICACION DE CONTIGUIDAD/GAP ENTRE SLOTS
+// BLOQUE 17 - [FIX A3] VERIFICACION DE CONTIGUIDAD/GAP ENTRE SLOTS
 // =============================================================================
 
 /**
@@ -840,7 +840,7 @@ export function _areSlotsContiguous(slot1, slot2, maxGapMinutes = 120) {
 }
 
 // =============================================================================
-// BLOQUE 18 — [FIX A4] PROYECCION DE SLOTS CERTIFICADOS Y WRITER
+// BLOQUE 18 - [FIX A4] PROYECCION DE SLOTS CERTIFICADOS Y WRITER
 // =============================================================================
 
 /**
@@ -854,7 +854,7 @@ export function _projectCertifiedSlot(slot, resourceId) {
   const s = _normalizeSlotShape(slot);
   if (!s) return null;
 
-  const serviceId = _safeTrim(s.serviceId || s.primaryServiceGuid);
+  const serviceId = _safeTrim(s.serviceId );
   if (!serviceId || !_looksLikeGuid(serviceId)) return null;
 
   const resourceIdClean = _safeTrim(resourceId || s.resourceId || s.resource?.id);
@@ -917,12 +917,12 @@ export function _projectWriterSlotFromAvailability(slot, resourceId, serviceId) 
 }
 
 // =============================================================================
-// BLOQUE 19 — [FIX A2] SLOTS DUALES OPTIMIZADOS CON CACHE PRE-WARM
+// BLOQUE 19 - [FIX A2] SLOTS DUALES OPTIMIZADOS CON CACHE PRE-WARM
 // =============================================================================
 
 /**
  * Alias optimizado para getCertifiedDualSlots.
- * Delega en reservas.web.js pero añade validacion de cache y pre-warm.
+ * Delega en reservas.web.js pero anade validacion de cache y pre-warm.
  * @param {string} serviceId - GUID del servicio
  * @param {string} resourceId - GUID del recurso (opcional)
  * @param {string} dateYMD - Fecha YYYY-MM-DD
@@ -976,7 +976,7 @@ export async function getCertifiedDualSlotsOptimized(serviceId, resourceId, date
 }
 
 // =============================================================================
-// BLOQUE 20 — HELPERS ADICIONALES (BIBLIA 12.2)
+// BLOQUE 20 - HELPERS ADICIONALES (BIBLIA 12.2)
 // =============================================================================
 
 /**
