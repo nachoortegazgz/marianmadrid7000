@@ -5,12 +5,12 @@ node_modules/
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
 # Logs and temp files
 *.log
 *.tmp
 
-# Package lock file (already in changes)
+# Package lock file
 package-lock.json
 ```
