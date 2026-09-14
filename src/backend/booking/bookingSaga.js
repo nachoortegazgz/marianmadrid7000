@@ -1,7 +1,8 @@
 /*
 =============================================================================
 MODULE: backend/booking/bookingSaga.js
-VERSION: v5007.5-SSOT (HAL-S1..S12 + HAL-MAP alignment)
+VERSION: v5007.6-SSOT (FIX editor: restauracion de _ y * eliminados por
+        procesado Markdown sobre v5007.5)
 SSOT: SSOT CONSOLIDADO v5002.6 | ESQUEMA CMS v5002.5 | DOSSIER RESERVAS v0609
 MISSION: Orquestador transaccional. Saga compensable para reservas simples
          y duales con gap de exposicion. Gestiona locks, heartbeat,
@@ -18,7 +19,8 @@ INVENTARIO DE FUNCIONES:
   [EXPORT] executeBookingSaga(unsafePayload)
 =============================================================================
 DEPENDENCIAS:
-  - backend/internalConfig.js (COLLECTIONS, CONCURRENCY, ESTADOCITA, ESTADOPAGO, FORMA_PAGO)
+  - backend/internalConfig.js (COLLECTIONS, CONCURRENCY, SDK_CONFIG,
+    ESTADOCITA, ESTADOPAGO, FORMA_PAGO)
   - backend/booking/bookingCore.js (primitivas atomicas, locks, transacciones, logger)
   - backend/reservas.web.js (resolucion de servicios, slots, invalidacion cache)
   - public/mmUtils.js (makeTraceId, helpers seguros)
@@ -29,6 +31,14 @@ COLECCIONES QUE ESCRIBE: CitasF2, BookingTransactions, SlotLocks,
 COLECCIONES QUE LEE: ServiciosCatalogo, MapaStaff, CitasF2, BookingTransactions
 =============================================================================
 HISTORIAL DE CAMBIOS:
+  v5007.6 | 2026-09-14 | FIX EDITOR: restaurados 27 tokens corruptos por
+          |            | stripping de _ y * (parse error 325:86, multiplicadores
+          |            |  60  1000, constantes LOCKTTLMS/HEARTBEAT_MS,
+          |            | COLLECTIONS.CITASF2/COMPENSACIONESPENDIENTES,
+          |            | ERRORCODES.*, ESTADOPAGO., ESTADO_CITA.,
+          |            | lockSlotKeyOrFail, renewLock, hashKey, safeTrim,
+          |            | id COMP, strings PAIRTOKENPAYLOAD_MISMATCH y
+          |            | TRANSACTIONPREVIOUSLYFAILED).
   v5007.5 | 2026-09-14 | Alineacion SSOT v5002.6 completa. Eliminados todos
           |            | los fallbacks legacy. Campos canonicos al primer nivel
           |            | de CitasF2. Import corregido a bookingCore.logger.
@@ -66,7 +76,7 @@ import {
   _normalizeLocalIsoStr,
 } from "public/mmUtils";
 
-// [HAL-S4 FIX] logger imported from bookingCore.js (no backend/logger module exists in SSOT inventory)
+// [HAL-S4 FIX] logger imported from bookingCore.js (no backend/logger module in SSOT inventory)
 import {
   logger,
   createBookingElevated,
@@ -273,7 +283,7 @@ export async function executeBookingSaga(unsafePayload) {
     }
 
     // [HAL-S1 FIX] Trailing || removed, default empty string added
-    // [HAL-S5 FIX] primaryServiceId legacy fallback removed (R7 zero legacy)
+    // [HAL-S5 FIX] primaryServiceGuid legacy fallback removed (R7 zero legacy)
     const rawServiceId = _safeTrim(
       unsafePayload?.serviceId ||
       metaCita.serviceId ||
@@ -321,6 +331,7 @@ export async function executeBookingSaga(unsafePayload) {
       );
 
       if (!f2LocalStart) {
+        // [FIX EDITOR v5007.6] Multiplicadores  60  1000 restaurados (parse error 325:86)
         const f1EndUtc = getUtcDateFromMadridLocal(f1LocalEnd);
         const exposureMs = Math.max(0, Number(serviceConfig.exposureDuration || 0))  60  1000;
         const f2StartUtc = new Date(f1EndUtc.getTime() + exposureMs);
@@ -568,6 +579,7 @@ export async function executeBookingSaga(unsafePayload) {
           };
 
           const createF2 = async function () {
+            // [SSOT G.5] Jitter 400-1000ms (hasta migrar a CONCURRENCY.JITTER_MS)
             await new Promise(function (r) {
               setTimeout(r, 400 + Math.random() * 600);
             });
@@ -800,4 +812,3 @@ export async function executeBookingSaga(unsafePayload) {
       },
     };
   }
-}
