@@ -1,0 +1,707 @@
+# BLOQUE 0 — CONTEXTO, MARCO RECTOR Y METODOLOGÍA DEL PROYECTO
+## Sistema Marian Madrid · Wix Velo V2/V3 · SSOT v5002.6-CONSOLIDADA
+### Emisión: Velo Code Guardian · Estándar G10 ASCII · ES Modules
+
+> **Naturaleza de este documento**: Este bloque es la **carta fundacional** del proyecto. Define el contexto real, las necesidades, los objetivos, la metodología de trabajo, el rol del agente IA, las normas de calidad y los mecanismos de verificación. Todo desarrollo, refactorización, test o despliegue se rige por este marco. Ninguna instrucción posterior puede contradecir este bloque sin una actualización formal versionada.
+
+---
+
+## 0.1 · CONTEXTO REAL DEL PROYECTO
+
+| Aspecto | Valor |
+|---|---|
+| Nombre comercial | Marian Madrid Peluquería y Estética |
+| Site ID Wix | `188bed94-177c-4bc9-a9f0-35080d874f3e` |
+| Ubicación física | C/ Maurice Ravel 35, Local, 50012 Zaragoza |
+| Location ID Wix | `7a12abfd-bf30-4847-bcdf-00dc573d4802` |
+| Huso horario | `Europe/Madrid` |
+| Moneda | `EUR` |
+| País | `ES` |
+| Idioma | `es` |
+| Dominio | marianmadrid.es |
+| Horario operativo | L-V 9h-20h · S 8:30h-14:30h |
+| Modelo de negocio | Salón de peluquería y estética con servicios simples y duales, venta de productos físicos en salón y online |
+| Personal activo | 3 profesionales (Marian, Andrea, Alba) — modelo de recurso único por slot, NO multiservice |
+| Canales operativos | Reservas online (Wix Bookings V2 custom), TPV salón, Pasarela Wix Payments V2, Tienda online (Wix Stores V1) |
+| Marco normativo | SIF/Veri*factu (RD 1007/2023, Orden HAC/1177/2024), IVA, PGC, Registro Horario (Art. 34.9 ET, RD-ley 8/2019), RGPD/LOPDGDD |
+
+### 0.1.1 Personal activo (SSOT — MapaStaff)
+
+| Profesional | Email | resourceId | scheduleId | Rol |
+|---|---|---|---|---|
+| MARIAN MADRID | `marian@marianmadrid.es` | `e556070a-6d6a-402e-8422-11133033ea76` | `06af20d4-1ec3-49fa-9075-f0691dfa7fd4` | PROPIETARIA / ADMIN |
+| ANDREA STAFF | `andrea@marianmadrid.es` | `07f7344f-e7e4-4c53-854b-47fd82ac8d40` | `a494b829-8161-4b84-b78d-6ffed45b4abe` | ESTILISTA |
+| ALBA STAFF | `alba@marianmadrid.es` | `9b905bfd-1a09-485d-9273-a24a20dfe648` | `94b8980d-63f4-43b1-ba86-41075e0eb63c` | ESTILISTA |
+
+### 0.1.2 Estado actual del proyecto
+
+| Aspecto | Estado |
+|---|---|
+| Documentación SSOT | 5 documentos base consolidados en SSOT v5002.6 |
+| Colecciones CMS | 32 canónicas + 1 auxiliar (CategoriasServicio) definidas |
+| Módulos backend | 16 canónicos inventariados |
+| Helpers frontend | 4 inventariados |
+| Motor de reservas | Diseñado e implementado (Saga, locks, idempotencia) |
+| Caja/Contabilidad | Diseñado (17 flujos económicos) |
+| Webhooks | 1 implementado (M365), 2 pendientes (pago, pedido) |
+| Limitaciones conocidas | 4 items pendientes en motor de reservas (ver DOSSIER §13) |
+
+---
+
+## 0.2 · ENTORNO TÉCNICO INICIAL
+
+### 0.2.1 Runtime y plataforma
+
+| Componente | Detalle |
+|---|---|
+| Plataforma | Wix Velo (V2/V3) |
+| Backend | Serverless (funciones Wix) |
+| Módulos | ES Modules (`import`/`export`) |
+| CMS | Wix Data (colecciones propias) |
+| Autenticación | Wix Members Area |
+| Secrets | Wix Secrets Manager |
+| Criptografía | Wix Crypto (SHA-256, HMAC, timingSafeEqual) |
+| Estándar de código | G10 ASCII Strict |
+
+### 0.2.2 Wix Apps nativas instaladas
+
+| App | App ID | Estado | Versión/Uso |
+|---|---|---|---|
+| Wix Bookings | `13d21c63-b5ec-5912-8397-c3a5ddb27a97` | Activa | **V2 exclusivo** |
+| Wix Stores | `1380b703-ce81-ff05-f115-39571d94eab3` | Activa | **Catalog V1** (no V3) |
+| Wix Events | `140603ad-af8d-84fb-9004-ee174e35054d` | Activa | Auxiliares |
+| Wix Forms & Payments | `14ce1214-b278-a7e4-1373-00cebd1bef7c` | Activa | V2 |
+| Wix Invoices | `13ee94c1-b635-8505-3391-97919052c16f` | Activa | Escritura delegada |
+| Wix Members Area | `14cc59bc-f0b7-15b8-e1c7-89ce41d0e0c9` | Activa | V2 |
+| Wix Gift Cards | `d80111c5-a0f4-47a8-b63a-65b54d774a27` | Activa | Requiere conciliación |
+
+### 0.2.3 SDKs utilizados
+
+| SDK | Import | Misión |
+|---|---|---|
+| Wix Bookings V2 | `wix-bookings.v2` | bookings / services / availabilityCalendar / availabilityTimeSlots |
+| Wix eCommerce Backend | `wix-ecom-backend` | checkout / orders |
+| Wix Auth | `wix-auth` (`elevate`) | Elevación segura en cron jobs y webhooks |
+| Wix Data | `wix-data` (`wixData`) | Acceso a colecciones CMS |
+| Wix Secrets Backend | `wix-secrets-backend` | Claves y secretos |
+| Wix Crypto | `wix-crypto` | Hash, HMAC, comparación segura |
+
+### 0.2.4 Constantes globales críticas
+
+| Constante | Valor |
+|---|---|
+| `STAFF_RESOURCE_TYPE_ID` | `1cd44cf8-756f-41c3-bd90-3e2ffcaf1155` |
+| `LOCATION_ID` | `7a12abfd-bf30-4847-bcdf-00dc573d4802` |
+| `TZ` | `Europe/Madrid` |
+| `MUTEX_TTL_MS` | 300000 (5 min) |
+| `HEARTBEAT_MS` | 15000 (15 s) |
+| `DUAL_CACHE_TTL_MS` | 900000 (15 min) |
+| `SLOT_SEARCH.DIAS_LIMITE` | 14 |
+
+---
+
+## 0.3 · NECESIDADES INICIALES QUE CUBRE EL PROYECTO
+
+### 0.3.1 Necesidades operativas del salón
+
+| Necesidad | Solución implementada |
+|---|---|
+| Reserva online de servicios simples | Motor de reservas con Wix Bookings V2 custom |
+| Reserva online de servicios duales con gap de exposición | Saga transaccional F1 + exposición + F2 |
+| Liberación de profesional durante el gap | Modelo de recurso único por slot con balanceo |
+| Cobro presencial en TPV | Módulo de caja física (`cajas.web.js`) |
+| Cobro online con pasarela Wix Payments | Checkout eCommerce + webhook de pago |
+| Venta de productos físicos en salón | Inventario + caja física |
+| Venta de productos online | Wix Stores V1 + eCommerce |
+| Devoluciones y reembolsos | Flujo 6 del DOSSIER CAJA |
+| Registro horario del personal | `horario.web.js` + `RegistrosHorariosStaff` |
+| Gestión de inventario | `inventario.web.js` + 3 colecciones M4 |
+
+### 0.3.2 Necesidades de cumplimiento normativo
+
+| Necesidad | Solución implementada |
+|---|---|
+| SIF / Veri*factu (RD 1007/2023) | `EventosSistemaFacturacion` + cadena hash + firma HMAC |
+| IVA (separación base/cuota/tipo) | `MovimientosCaja` + `LibroIVAFacturasExpedidas` + `LibroIVAFacturasRecibidas` |
+| Contabilidad PGC (partida doble) | `AsientosContables` + `LineasAsientoContable` + `LibroMayorContableSaldos` |
+| Registro horario (Art. 34.9 ET) | `RegistrosHorariosStaff` inmutable |
+| RGPD/LOPDGDD | Minimización, enmascarado PII, roles, consentimiento |
+| Facturación secuencial | `SecuenciaTickets` + `invoiceNumber` único por serie |
+| Cierre Z diario | `HistoricoCierresZ` inmutable y firmado |
+
+### 0.3.3 Necesidades técnicas
+
+| Necesidad | Solución implementada |
+|---|---|
+| Idempotencia en reservas | `pairToken` determinista + `BookingTransactions` |
+| Exclusión mutua en slots | `SlotLocks` + heartbeat |
+| Compensación ante fallos | Patrón Saga + `CompensacionesPendientes` |
+| Caché multicapa | RAM + `AvailabilityDaysCache` + `DualSlotCache` |
+| Rate limiting | `security.js` + `RateLimitBlocks` |
+| Trazabilidad transversal | `traceId` generado por `makeTraceId()` |
+| Inmutabilidad fiscal/laboral | Hooks `beforeUpdate`/`beforeRemove` en `data.js` |
+
+---
+
+## 0.4 · OBJETIVOS PRINCIPALES
+
+### 0.4.1 Gestión de reservas online (Wix App Custom)
+
+El motor de reservas es una **implementación custom sobre Wix Bookings V2** que extiende las capacidades nativas de Wix para soportar el modelo de negocio específico de Marian Madrid.
+
+**Arquitectura de tres capas**:
+
+| Capa | Módulo | Responsabilidad |
+|---|---|---|
+| Disponibilidad | `reservas.web.js` | Consulta Wix Bookings V2, construcción de slots duales, balanceo, caché |
+| Orquestación | `bookingSaga.js` | Saga compensable, locks, idempotencia, creación paralela F1+F2 |
+| Primitivas | `bookingCore.js` | Acceso a Wix Bookings V2, locks, transacciones, persistencia CitasF2 |
+
+**Flujo de reserva**:
+
+```
+Cliente → getAvailableDays() → getCertifiedDualSlots() → executeBookingSaga()
+         → [LockSlots] → [CreateBookings F1+F2] → [CreateCheckout / ConfirmPresencial]
+         → persistBooking(CitasF2) → completeTransaction → unlock → invalidateCache
+```
+
+### 0.4.2 Tipos de servicios
+
+| Tipo | Descripción | Campos clave en ServiciosCatalogo |
+|---|---|---|
+| Servicio simple | Una sola fase, una profesional | `serviceType: SIMPLE`, `allowCombine: false` |
+| Servicio dual con gap | F1 (aplicación) → exposición → F2 (aclarado) | `serviceType: DUAL`, `allowCombine: true`, `linkedPhases`, `phase1Duration`, `exposureDuration`, `phase2Duration` |
+
+**Modelo de servicio dual**:
+
+```
+F1 (Aplicación)  →  Gap/Exposición  →  F2 (Aclarado/Matizado)
+phase1Duration       exposureDuration      phase2Duration
+    ██████████░░░░░░░░░░░░░░░░░░░░░░░████████████
+    │← Profesional ocupada →│← Libre →│← Ocup. →│
+```
+
+Durante el gap, la profesional queda liberada y puede atender otros servicios simples. El slot de F2 llega al final del gap.
+
+**Complementos (addons)**: Servicios adicionales opcionales vinculados a un servicio principal. Se almacenan en `ComplementosCatalogo` y se vinculan vía `addOnOptions` (MULTI_REF).
+
+### 0.4.3 Gestión del negocio según normativa y registros
+
+**Ruta canónica de toda operación económica**:
+
+```
+Evento Wix o acción autorizada
+    ↓
+Validación de permisos e idempotencia
+    ↓
+Recálculo servidor (importes, impuestos, stock)
+    ↓
+Registro en ledger fiscal (MovimientosCaja)
+    ↓
+Registro contable (AsientosContables + LineasAsientoContable)
+    ↓
+Registro de auditoría (MmAuditLog + EventosSistemaFacturacion)
+    ↓
+Exportación documental al contable
+```
+
+**17 flujos económicos** (ver DOSSIER CAJA):
+
+| Flujo | Origen | Colecciones principales |
+|---|---|---|
+| 1. Apertura caja | Módulo interno | CajaActual, MmAuditLog |
+| 2. Cobro reserva presencial | Wix Bookings + TPV | CitasF2, MovimientosCaja, LibroIVAFacturasExpedidas, AsientosContables |
+| 3. Cobro reserva online | Wix Bookings + Payments | BookingTransactions, CitasF2, MovimientosCaja, LibroIVAFacturasExpedidas |
+| 4. Venta producto física | TPV / Stores V1 | InventarioStockVenta, MovimientosInventario, MovimientosCaja |
+| 5. Venta producto online | Wix Stores / eCommerce | MovimientosInventario, MovimientosCaja, LibroIVAFacturasExpedidas |
+| 6. Devoluciones y reembolsos | Payments / caja | MovimientosCaja, LibroIVAFacturasExpedidas, MovimientosInventario, AsientosContables |
+| 7. Tarjetas regalo | Gift Cards / caja | MovimientosCaja, AsientosContables |
+| 8. Movimientos manuales caja | Manual autorizado | MovimientosCaja, LibroIVAFacturasRecibidas, AsientosContables |
+| 9. Arqueo parcial X | Caja | ControlParcialX, AlertasOperativas |
+| 10. Cierre Z | Caja | HistoricoCierresZ, EventosSistemaFacturacion |
+| 11. Contabilización automática | Todos | AsientosContables, LineasAsientoContable, LibroMayorContableSaldos |
+| 12. Facturas recibidas y gastos | Manual / proveedor | LibroIVAFacturasRecibidas, MovimientosCaja, AsientosContables |
+| 13. Compra productos | Proveedor | InventarioStockVenta, MovimientosInventario, LibroIVAFacturasRecibidas |
+| 14. Ajustes inventario | Inventario | MovimientosInventario, InventarioStockVenta |
+| 15. Cierre inventario valorado | Inventario | InventarioStockVentaCierre, AsientosContables |
+| 16. Registro horario laboral | Members / widget | RegistrosHorariosStaff, MmAuditLog |
+| 17. Eventos SIF / Veri*factu | Sistema | EventosSistemaFacturacion |
+
+### 0.4.4 Objetivos finales verificables
+
+| Objetivo | Resultado exigido | Evidencia mínima |
+|---|---|---|
+| Reservas simples | Disponibilidad real, slot válido, una sola reserva | Prueba de contrato, simulación, preview |
+| Reservas duales con exposición | F1, gap, F2 certificados; idempotencia; compensación | Pruebas de Saga (éxito, fallo F2, fallo CMS, reintento, solape) |
+| Liberación durante gap | Recurso disponible entre F1 y F2 para servicio simple | Caso de integración F1 → simple → F2 |
+| Concurrencia | Mismo resultado para solicitudes iguales; no sobre-reserva | Pruebas de pairToken, slotKey, heartbeat |
+| Cobro de reservas | Checkout y estado derivados de datos recalculados en servidor | Sandbox checkout, evento de pago idempotente |
+| Venta online | Catálogo nativo, checkout eCommerce, stock/pedido/cobro/devolución enlazados | Ensayo sandbox completo |
+| Caja y operaciones presenciales | Movimientos trazables, autorizados, idempotentes | Pruebas de caja, cadena de integridad, roles |
+| Trazabilidad transversal | Cada evento relaciona traceId, entidad Wix, estado, auditoría | Consulta de BookingTransactions, CitasF2, movimientoCaja |
+| Control laboral | Fichajes inmutables, acceso limitado, minimización | Pruebas de hooks, roles, bloqueo update/remove |
+
+---
+
+## 0.5 · DIRECTRICES DE CALIDAD DE CÓDIGO Y BUENAS PRÁCTICAS
+
+### 0.5.1 Criterio de código óptimo (DIRECTRICES V19 §1)
+
+El código se considera óptimo y final **solo si cumple simultáneamente**:
+
+| Dimensión | Criterio de aceptación |
+|---|---|
+| **Funcional** | Los flujos esenciales finalizan con resultado verificable, sin duplicados ni estados incongruentes |
+| **Fiable** | Los errores parciales activan compensación, liberación de locks, persistencia coherente y respuestas seguras |
+| **Simple** | Cada responsabilidad tiene un módulo propietario; no se duplican reglas, constantes, flujos de creación ni lógica de autorización |
+| **Compatible con Wix** | Respeta contratos de Wix Bookings V2, Wix eCommerce, Wix Payments/Cashier, Wix Data, Wix Members, Wix Secrets |
+| **Evolucionable** | Toda actualización del SDK se valida contra documentación oficial, contrato existente, pruebas y Local Editor antes de publicación |
+
+> **La condición se demuestra con evidencia de pruebas** (locales, Local Editor, preview y sandbox del proveedor de pagos), **no por documentación o revisión estática aislada**.
+
+### 0.5.2 Convenciones de código (DIRECTRICES V19 §3.2)
+
+| Regla | Implementación |
+|---|---|
+| Funciones internas | Prefijo `_` |
+| Web Methods | Permisos y rate limiting en el borde; funciones internas no reimplementan RBAC |
+| Constantes | Importadas de `public/mmUtils.js` y `backend/internalConfig.js` |
+| Secretos | Exclusivamente desde Wix Secrets Manager |
+| ASCII | G10 ASCII Strict: solo caracteres ASCII imprimibles en fuentes, comentarios y logs |
+| Fechas | Siempre en `Europe/Madrid` mediante helpers seguros frente a DST |
+| Consultas CMS | Límites, paginación e índices en consultas masivas |
+| PII | Respuestas y logs enmascaran PII; datos de cliente no se registran sin necesidad operacional |
+
+### 0.5.3 Nomenclatura canónica (Decreto v5002.5)
+
+| # | Regla | Ejemplo correcto | Prohibido |
+|---|---|---|---|
+| R1 | Dualidad de identidad | `tituloServicio` / `title` | Una sola identidad |
+| R2 | Traducción literal conservando orden | `serviceId` → `servicioId` | `idServicio` |
+| R3 | Diferenciación por contexto | `descripcionServicio` | `description` genérico |
+| R4 | Términos intraducibles | `slotF1`, `nombreStaff` | `ranuraF1`, `empleado` |
+| R5 | Restricciones sintácticas | `operacionFecha` | `operaciónFecha` |
+| R6 | Alineación nativa Wix V2 | `bookingId`, `serviceId` | `booking_id` |
+| R7 | Cero legacy | `serviceId`, `linkedPhases` | `primaryServiceGuid` |
+
+### 0.5.4 Identidades legacy prohibidas
+
+| ID prohibida | Sustituto canónico |
+|---|---|
+| `primaryServiceGuid` | `serviceId` |
+| `secondaryServiceGuid` | `linkedPhases` |
+| `staffId` | `resourceId` |
+| `empleada` | `staff` o `resource` |
+| `lockKey` (field key) | `slotKey` |
+| `resourceName` | `displayName` / `nombreStaff` |
+| `MmLocks` | `SlotLocks` |
+| `CONCILIACION_STOCK_WIX` | `MovimientosInventario` |
+| `SYNC_M365` | `M365GraphSyncQueue` |
+| `AVAILABILITY_SLOTS_CACHE` | `DualSlotCache` |
+
+### 0.5.5 Inmutabilidad (hooks `data.js`)
+
+| Colección | Hook | Acción | Excepción |
+|---|---|---|---|
+| MovimientosCaja | beforeUpdate / beforeRemove | Prohibido | FISCAL_VIOLATION |
+| HistoricoCierresZ | beforeUpdate / beforeRemove | Prohibido | FISCAL_VIOLATION |
+| EventosSistemaFacturacion | beforeUpdate / beforeRemove | Prohibido | SIF_VIOLATION |
+| RegistrosHorariosStaff | beforeUpdate / beforeRemove | Prohibido | LABOR_LOG_VIOLATION |
+| CajaActual | beforeRemove | Singleton protegido | SINGLETON_VIOLATION |
+| ServiciosCatalogo | beforeInsert / beforeUpdate | Validar esquema | SCHEMA_VIOLATION |
+| MapaStaff | beforeInsert / beforeUpdate | Validar unicidad | SCHEMA_VIOLATION |
+| AsientosContables | beforeUpdate / beforeRemove | Bloquea POSTED/LOCKED | ACCOUNTING_VIOLATION |
+| LineasAsientoContable | beforeUpdate / beforeRemove | Bloquea si padre posteado | ACCOUNTING_VIOLATION |
+| SecuenciaTickets | beforeUpdate | No salto regresivo | SEQUENCE_VIOLATION |
+| InventarioStockVentaCierre | beforeUpdate / beforeRemove | Bloquea cierre firmado | INVENTORY_VIOLATION |
+
+---
+
+## 0.6 · ROL DEL AGENTE IA A LA MEDIDA
+
+### 0.6.1 Identidad del agente
+
+| Aspecto | Definición |
+|---|---|
+| Nombre | Velo Code Guardian |
+| Especialización | Desarrollador Master de Wix y Wix Studio, JavaScript SDK, Velo V3/V2, WixApps y APIs |
+| Estándar | G10 ASCII Strict · ES Modules · Wix Velo SDK V2/V3 |
+| Autoridad | Única fuente de decisión técnica dentro del marco SSOT |
+| Limitación | No puede autocertificar cumplimiento legal; requiere validación externa |
+
+### 0.6.2 Responsabilidades del agente
+
+| Responsabilidad | Alcance |
+|---|---|
+| Desarrollo | Escribir código Velo V2/V3 alineado con SSOT |
+| Refactorización | Transformar código existente hacia el estado óptimo |
+| Testing | Diseñar y ejecutar pruebas según plan de verificación |
+| Auditoría | Verificar coherencia entre código, colecciones y SSOT |
+| Documentación | Generar y mantener documentación técnica |
+| Despliegue | Preparar y validar despliegues con evidencia completa |
+
+### 0.6.3 Prohibiciones del agente
+
+| Prohibición | Razón |
+|---|---|
+| Asumir comportamiento no verificado | Norma anti-suposiciones §0.10 |
+| Declarar PASS sin evidencia de tests | DIRECTRICES V19 §1 |
+| Modificar datos reales de producción sin autorización | Seguridad operativa |
+| Autocertificar cumplimiento legal | Requiere validación externa |
+| Introducir APIs deprecated | Cero deprecated |
+| Usar identidades legacy | Cero legacy |
+| Escribir fuera de la ruta canónica de módulos | Regla inquebrantable §3.1 |
+| Hardcodear secretos | Solo Wix Secrets Manager |
+| Exponer PII en logs | RGPD/LOPDGDD |
+
+---
+
+## 0.7 · FUENTES VÁLIDAS CONSULTIVAS
+
+### 0.7.1 Documentación SSOT interna (jerarquía)
+
+| Prioridad | Documento | Versión | Contenido |
+|---|---|---|---|
+| 1 | SSOT CONSOLIDADO v5002.6 | v5002.6 | Gobernanza, decisiones, resolución de conflictos |
+| 2 | SSOT.json | v5002.5-corregida | Detalle machine-readable de campos |
+| 3 | ESQUEMA CMS NORMALIZADO | v5002.5 | Tablas exhaustivas de campos, tipos, índices |
+| 4 | BIBLIA DEFINITIVA | v5002.5 | Inventario canónico, contexto, configuración, módulos |
+| 5 | DOSSIER MOTOR RESERVAS | v0609 | Arquitectura y flujo de reservas |
+| 6 | DOSSIER CAJA/CONTABILIDAD/INVENTARIO | v5002.4 | 17 flujos económicos y fiscales |
+| 7 | DIRECTRICES Y OBJETIVOS V19 | V19 | Marco rector, criterios de óptimo, nomenclatura |
+
+> **Regla de prevalencia**: En caso de conflicto entre documentos, prevalece el de mayor prioridad en esta tabla. Si el conflicto persiste, se documenta y se resuelve en el SSOT CONSOLIDADO.
+
+### 0.7.2 Documentación oficial externa
+
+| Fuente | URL |
+|---|---|
+| Wix: Working with Payments, Transactions, and Orders | https://dev.wix.com/docs/api-reference/business-solutions/e-commerce/payments/working-with-payments-transactions-and-orders |
+| Wix: Create Checkout | https://dev.wix.com/docs/velo/apis/wix-ecom-backend/checkout/create-checkout |
+| AEAT: Sistemas Informáticos de Facturación y VERIFACTU | https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu.html |
+| AEPD: Responsabilidad proactiva | https://www.aepd.es/preguntas-frecuentes/2-tus-obligaciones-como-responsable-del-tratamiento/4-los-principios-del-tratamiento/FAQ-0208-que-es-el-principio-de-responsabilidad-proactiva |
+
+### 0.7.3 Regla de consulta
+
+| Regla | Descripción |
+|---|---|
+| SSOT primero | Siempre consultar la SSOT interna antes de cualquier decisión |
+| Documentación oficial | Para APIs Wix, consultar la documentación oficial vigente |
+| Normativa legal | Para SIF/Veri*factu, IVA, PGC, registro horario, consultar fuentes oficiales AEAT/BOE |
+| No suponer | Si la información no está en las fuentes válidas, se marca como PENDIENTE DE VERIFICACIÓN |
+
+---
+
+## 0.8 · PRIORIDAD
+
+### 0.8.1 Orden de prioridad global
+
+| Prioridad | Área | Justificación |
+|---|---|---|
+| 1 | Inmutabilidad fiscal/laboral y hooks `data.js` | Cumplimiento legal (SIF, Art. 34.9 ET) |
+| 2 | Integridad del ledger y cadena hash | Veri*factu, evidencia ante AEAT |
+| 3 | Motor de reservas (Saga, locks, idempotencia) | Core del negocio |
+| 4 | Eliminación de deprecated y legacy | Cero deuda técnica |
+| 5 | Webhooks pendientes (pago, pedido) | Confirmación de pagos online |
+| 6 | Desduplicación de constantes y lógica | Simplicidad |
+| 7 | Seguridad (rate limiting, RBAC, secretos) | Protección del sistema |
+| 8 | Optimización de caché y rendimiento | Experiencia de usuario |
+| 9 | Limpieza final y documentación | Mantenibilidad |
+
+### 0.8.2 Severidad de hallazgos
+
+| Severidad | Definición | Efecto |
+|---|---|---|
+| CRÍTICO | Corrupción de datos, doble reserva, doble cobro, ruptura de inmutabilidad | BLOQUEO INMEDIATO |
+| ALTO | Comportamiento incorrecto en casos límite, estado inconsistente recuperable | BLOQUEO si no hay workaround |
+| MEDIO | Debilidad estructural, falta de persistencia, caché no invalidada | Se registra, no bloquea |
+| BAJO | Rendimiento subóptimo, documentación incompleta | Advisory |
+
+---
+
+## 0.9 · METODOLOGÍA DE TRABAJO
+
+### 0.9.1 Ciclo de entrega obligatorio (DIRECTRICES V19 §7)
+
+Cada cambio sigue **estrictamente** esta secuencia:
+
+| Paso | Acción | Evidencia |
+|---|---|---|
+| 1 | Rama aislada en el repositorio | Nombre de rama |
+| 2 | Análisis de impacto sobre colecciones, APIs nativas y flujos | Informe de impacto |
+| 3 | Modificación mínima (principio de cambio quirúrgico) | Diff revisado |
+| 4 | Pruebas estáticas (lint, tipos, reglas SSOT) | Resultado de puertas T-EST |
+| 5 | Regresiones sobre flujos críticos | Resultado de tests T-E2E |
+| 6 | Simulación determinista con datos controlados | Logs de simulación |
+| 7 | Local Editor y preview en sitio de prueba | Captura o log |
+| 8 | Revisión de diferencias frente a la SSOT | Informe de alineación |
+
+> **Solo los cambios con evidencia completa podrán proponerse para publicación.** La publicación, el despliegue de cambios que afecten datos reales y cualquier cobro o devolución real requieren una validación operativa independiente.
+
+### 0.9.2 Fases de refactorización
+
+| Fase | Tipo de corrección | Severidad | Bloqueante |
+|---|---|---|---|
+| RF-01 | Errores críticos | CRÍTICO | SÍ |
+| RF-02 | Errores no críticos | ALTO | SÍ |
+| RF-03 | Debilidades estructurales | MEDIO-ALTO | SÍ |
+| RF-04 | Deuda técnica | MEDIO | NO |
+| RF-05 | Código muerto / obsoleto / duplicado | MEDIO | NO |
+| RF-06 | Optimización y simplificación | BAJO-MEDIO | NO |
+| RF-07 | Migración a versiones actualizadas | BAJO | NO |
+
+### 0.9.3 Plan de tests obligatorio
+
+| Batería | Tests | Bloqueante |
+|---|---|---|
+| T-EST (Estáticos) | 10 puertas | SÍ |
+| T-UNI (Unitarios) | 28 tests | SÍ si CRÍTICO |
+| T-INT (Integración) | 37 tests | SÍ si CRÍTICO |
+| T-CON (Contrato API) | 6 tests | SÍ |
+| T-E2E (Flujos completos) | 15 tests | SÍ |
+| T-CONC (Concurrencia) | 10 tests | SÍ |
+| T-SEC (Seguridad) | 11 tests | SÍ |
+| T-INM (Inmutabilidad) | 14 tests | SÍ |
+| T-FIS (Integridad fiscal) | 10 tests | SÍ |
+| T-COL (Colecciones CMS) | 10 × 33 | SÍ |
+| T-PER (Rendimiento) | 9 tests | NO (advisory) |
+
+---
+
+## 0.10 · NORMAS GENÉRICAS ANTI-SUPOSICIONES
+
+### 0.10.1 Principio fundamental
+
+> **Ninguna afirmación técnica es válida sin evidencia verificable.** El agente no puede asumir, inferir ni extrapolar comportamiento del código, de las APIs Wix, de las colecciones CMS ni de la normativa legal sin verificación directa.
+
+### 0.10.2 Reglas anti-suposiciones
+
+| ID | Regla | Implementación |
+|---|---|---|
+| AS-01 | No asumir que una función existe | Verificar con grep o lectura del archivo |
+| AS-02 | No asumir que un campo existe en una colección | Verificar contra SSOT.json o Esquema CMS |
+| AS-03 | No asumir que una API Wix se comporta de cierta forma | Consultar documentación oficial vigente |
+| AS-04 | No asumir que un hook está activo | Verificar en `data.js` y probar con inserción real |
+| AS-05 | No asumir que un test pasa | Ejecutar el test y presentar resultado |
+| AS-06 | No asumir que un despliegue es seguro | Verificar con Local Editor y preview |
+| AS-07 | No asumir cumplimiento legal | Requerir validación externa documentada |
+| AS-08 | No asumir que un cambio es retrocompatible | Verificar con tests de regresión |
+| AS-09 | No asumir que un secreto está configurado | Verificar en Wix Secrets Manager |
+| AS-10 | No asumir que un índice existe | Verificar en el panel de Wix Data |
+| AS-11 | No asumir que un enum tiene ciertos valores | Verificar en `internalConfig.js` |
+| AS-12 | No asumir que un módulo puede escribir en una colección | Verificar matriz de acceso a colecciones |
+
+### 0.10.3 Protocolo ante incertidumbre
+
+| Situación | Acción |
+|---|---|
+| Información no disponible en fuentes SSOT | Marcar como `PENDIENTE DE VERIFICACIÓN` y solicitar aclaración |
+| Contradicción entre fuentes | Documentar la contradicción y aplicar jerarquía de prevalencia |
+| Comportamiento no determinista | Diseñar test reproducible antes de continuar |
+| API Wix sin documentación clara | Marcar como `RIESGO DE INTEGRACIÓN` y diseñar fallback |
+
+---
+
+## 0.11 · MÉTRICAS EXIGIDAS
+
+### 0.11.1 Métricas de código
+
+| Métrica | Objetivo | Medición |
+|---|---|---|
+| Cobertura de tests | 100% de funciones críticas | Tests ejecutados / funciones críticas |
+| Cero deprecated | 0 APIs deprecated | Grep de imports V1 donde existe V2 |
+| Cero legacy | 0 forbiddenLegacyIds | Grep de IDs prohibidas |
+| G10 ASCII | 0 caracteres no ASCII | Análisis estático |
+| Deuda técnica | 0 items pendientes | Lista de limitaciones del DOSSIER |
+
+### 0.11.2 Métricas de fiabilidad
+
+| Métrica | Objetivo | Medición |
+|---|---|---|
+| Idempotencia | 100% de endpoints de escritura idempotentes | Tests T-CONC |
+| Inmutabilidad | 100% de colecciones fiscales/laborales protegidas | Tests T-INM |
+| Cadena hash | 100% de movimientos con cadena válida | Tests T-FIS |
+| Compensación | 100% de fallos de Saga compensados | Tests T-E2E |
+| Rate limiting | 100% de webMethods protegidos | Tests T-SEC |
+
+### 0.11.3 Métricas de rendimiento
+
+| Métrica | Objetivo | Medición |
+|---|---|---|
+| getAvailableDays (caché caliente) | < 200ms | T-PER-01 |
+| getAvailableDays (caché fría) | < 2000ms | T-PER-02 |
+| getCertifiedDualSlots | < 3000ms | T-PER-03 |
+| executeBookingSaga dual | < 8000ms | T-PER-04 |
+| registerZClosing (50 movimientos) | < 5000ms | T-PER-05 |
+
+### 0.11.4 Métricas de despliegue
+
+| Métrica | Objetivo | Medición |
+|---|---|---|
+| Tests ejecutados | 100% de baterías obligatorias | Informe de tests |
+| Tests PASS | 100% de CRÍTICO/ALTO | Tabla de resultados |
+| Colecciones verificadas | 33/33 | T-COL |
+| Hooks activos | 26/26 | T-INM |
+| Local Editor validado | SÍ | Captura/log |
+
+---
+
+## 0.12 · FORMATO DE CÓDIGO CON HISTORIAL/INVENTARIO
+
+### 0.12.1 Regla de inventario inicial
+
+> **Todo archivo de código debe comenzar con un bloque de inventario** que identifique el módulo, su versión, sus funciones exportadas y su historial de cambios. Esto evita la pérdida de código durante refactorizaciones y permite trazabilidad.
+
+### 0.12.2 Formato del bloque de inventario
+
+```javascript
+/**
+ * ============================================================================
+ * MODULO: backend/booking/bookingSaga.js
+ * VERSION: v5002.6
+ * SSOT: SSOT CONSOLIDADO v5002.6 | ESQUEMA CMS v5002.5 | DOSSIER RESERVAS v0609
+ * MISION: Orquestador transaccional. Saga compensable para reservas simples y duales.
+ * ============================================================================
+ * INVENTARIO DE FUNCIONES:
+ *   [EXPORT] _normalizePersistedMeta(meta)
+ *   [EXPORT] _resolveStablePairToken({...})
+ *   [EXPORT] _extractCheckoutId(checkoutSession)
+ *   [EXPORT] _bestEffortUnlockAll(lockKeys, lockOwnerId)
+ *   [CLASS]  SagaStep
+ *   [CLASS]  BookingSagaOrchestrator
+ *   [EXPORT] executeBookingSaga(unsafePayload)
+ * ============================================================================
+ * DEPENDENCIAS:
+ *   - backend/internalConfig.js (COLLECTIONS, CONCURRENCY, TIMEOUTS)
+ *   - backend/booking/bookingCore.js (primitivas atómicas)
+ *   - backend/responseUtils.js (AppError, successResponse)
+ *   - public/mmUtils.js (makeTraceId)
+ * ============================================================================
+ * COLECCIONES QUE ESCRIBE: CitasF2, BookingTransactions, SlotLocks,
+ *                           CompensacionesPendientes, DualSlotCache
+ * COLECCIONES QUE LEE: ServiciosCatalogo, MapaStaff
+ * ============================================================================
+ * HISTORIAL DE CAMBIOS:
+ *   v5002.6 | 2026-09-14 | Consolidación SSOT. Sin cambios funcionales.
+ *   v5002.5 | 2026-09-10 | Fix S-01: linkedPhases como fuente primaria.
+ *   v5002.3 | 2026-09-06 | Versión inicial del dossier.
+ * ============================================================================
+ */
+```
+
+### 0.12.3 Reglas del inventario
+
+| Regla | Descripción |
+|---|---|
+| INV-01 | Todo archivo de módulo debe tener el bloque de inventario |
+| INV-02 | El inventario lista TODAS las funciones exportadas y clases |
+| INV-03 | El inventario lista las dependencias de importación |
+| INV-04 | El inventario lista las colecciones que escribe y lee |
+| INV-05 | El historial registra cada cambio con versión, fecha y descripción |
+| INV-06 | El inventario se actualiza en cada refactorización |
+| INV-07 | El inventario es la referencia para detectar código perdido |
+
+---
+
+## 0.13 · ITERACIONES Y VERSIONES
+
+### 0.13.1 Esquema de versionado
+
+| Componente | Formato | Ejemplo |
+|---|---|---|
+| SSOT global | `v{MAJOR}.{MINOR}` | v5002.6 |
+| Módulo individual | `v{MAJOR}.{MINOR}` | v5002.6 |
+| Colección CMS | `v{MAJOR}.{MINOR}` | v5002.5 |
+| Test plan | `v{MAJOR}.{MINOR}` | v1.0 |
+| Refactorización | `RF-{NN}` | RF-01 |
+
+### 0.13.2 Registro de iteraciones
+
+Cada iteración debe producir:
+
+| Artefacto | Contenido |
+|---|---|
+| Informe de iteración | Qué se cambió, por qué, qué se verificó |
+| Diff completo | Cambios línea por línea |
+| Tests ejecutados | Resultados de todas las baterías aplicables |
+| Comparativa con versión anterior | Qué cambió respecto a la versión sustituida |
+| Limitaciones pendientes | Items no resueltos en esta iteración |
+
+### 0.13.3 Reglas de iteración
+
+| Regla | Descripción |
+|---|---|
+| ITER-01 | Cada iteración se ejecuta en rama aislada |
+| ITER-02 | Cada iteración tiene un objetivo claro y acotado |
+| ITER-03 | Cada iteración produce evidencia de tests |
+| ITER-04 | Cada iteración actualiza el inventario del módulo |
+| ITER-05 | Cada iteración registra su versión en el historial |
+| ITER-06 | Una iteración no se cierra sin evidencia completa |
+
+---
+
+## 0.14 · CORRECCIONES Y COMPARATIVAS CON VERSIONES SUSTITUIDAS
+
+### 0.14.1 Principio de verificación por comparativa
+
+> **Toda corrección debe demostrar que el estado nuevo es estrictamente mejor que el estado anterior.** No se acepta una corrección que introduzca regresiones sin justificación explícita.
+
+### 0.14.2 Formato de comparativa
+
+| Aspecto | Versión anterior | Versión nueva | Verificación |
+|---|---|---|---|
+| Función X | Comportamiento anterior | Comportamiento nuevo | Test que lo demuestra |
+| Campo Y | Tipo/valor anterior | Tipo/valor nuevo | Consulta CMS |
+| Hook Z | No existía | Implementado | Test de inmutabilidad |
+| Constante W | Valor anterior | Valor nuevo | Test unitario |
+
+### 0.14.3 Reglas de corrección
+
+| Regla | Descripción |
+|---|---|
+| CORR-01 | Toda corrección identifica el hallazgo que la motiva |
+| CORR-02 | Toda corrección presenta el estado anterior y el estado nuevo |
+| CORR-03 | Toda corrección incluye el test que verifica la mejora |
+| CORR-04 | Toda corrección actualiza el inventario del módulo |
+| CORR-05 | Toda corrección registra la versión en el historial |
+| CORR-06 | Una corrección no puede eliminar funcionalidad sin justificación |
+| CORR-07 | Una corrección no puede introducir deuda técnica nueva |
+
+### 0.14.4 Matriz de trazabilidad de correcciones
+
+| ID Hallazgo | Severidad | Módulo | Colección | Corrección | Test | Estado |
+|---|---|---|---|---|---|---|
+| HAL-01 | CRÍTICO | bookingCore.js | CitasF2 | RF-01.01 | T-INT-CORE-11 | PENDIENTE |
+| HAL-02 | CRÍTICO | bookingSaga.js | CitasF2 | RF-01.02 | T-INT-SAGA-XX | PENDIENTE |
+| HAL-03 | CRÍTICO | data.js | AsientosContables | RF-01.04 | T-INM-DATA-XX | PENDIENTE |
+| HAL-04 | CRÍTICO | data.js | MovimientosCaja | RF-01.05 | T-FIS-CAJA-XX | PENDIENTE |
+| HAL-05 | CRÍTICO | citasManager.web.js | MovimientosCaja | RF-01.06 | T-CONC-XX | PENDIENTE |
+
+---
+
+## 0.15 · DICTAMEN DEL BLOQUE 0
+
+Este bloque constituye la **carta fundacional** del proyecto Marian Madrid. Define:
+
+- El contexto real del negocio y su entorno técnico
+- Las necesidades operativas y de cumplimiento que el sistema cubre
+- Los objetivos principales verificables
+- Las directrices de calidad de código y buenas prácticas
+- El rol, responsabilidades y prohibiciones del agente IA
+- Las fuentes válidas consultivas con jerarquía de prevalencia
+- La prioridad de trabajo por áreas
+- La metodología de entrega obligatoria
+- Las normas anti-suposiciones
+- Las métricas exigidas
+- El formato de código con inventario e historial
+- El esquema de iteraciones y versiones
+- Las reglas de corrección y comparativa
+
+**Todo desarrollo, refactorización, test o despliegue se rige por este marco.** Ninguna instrucción posterior puede contradecir este bloque sin una actualización formal versionada y documentada.
+
+---
+
+*Fin del Bloque 0 — Contexto, Marco Rector y Metodología*
+*Versión: v5002.6-CONSOLIDADA*
+*Guardian: Velo Code Guardian*
+*Fecha de emisión: 2026-09-14*

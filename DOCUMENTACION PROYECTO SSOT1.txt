@@ -1,0 +1,740 @@
+# SSOT CONSOLIDADO — ECOSISTEMA MARIAN MADRID
+## Versión v5002.6-CONSOLIDADA · Sustituye y unifica los 5 documentos base
+### Emisión: Velo Code Guardian · Estándar G10 ASCII · ES Modules · Wix Velo V2/V3
+
+> **Gobernanza de versión**: Este documento es la ÚNICA Fuente de Verdad. Resuelve las 118 inconsistencias detectadas entre `BIBLIA DEFINITIVA.md` (v5002.5), `ESQUEMA CMS NORMALIZADO.txt` (v5002.5), `SSOT.json` (v5002.5-corregida), `DOSSIER MOTOR RESERVAS.md` (v0609/v5002.3) y `DOSSIER CAJA` (v5002.4) y `DIRECTRICES V19`. En caso de conflicto residual, prevalece este documento.
+>
+> **Jerarquía de referencia**: Este SSOT (gobernanza y decisiones) → `SSOT.json` (detalle machine-readable de campos) → `ESQUEMA CMS NORMALIZADO` (tablas exhaustivas de campos/índices). Los dossiers de Motor de Reservas y Caja quedan como documentación de flujo, subordinada a este SSOT.
+
+---
+
+## BLOQUE 1 — IDENTIDAD Y CONTEXTO DEL NEGOCIO
+
+| Aspecto | Valor |
+|---|---|
+| Nombre comercial | Marian Madrid Peluquería y Estética |
+| Site ID | `188bed94-177c-4bc9-a9f0-35080d874f3e` |
+| Location ID (Wix) | `7a12abfd-bf30-4847-bcdf-00dc573d4802` |
+| Ubicación física | C/ Maurice Ravel 35, Local, 50012 Zaragoza |
+| Huso horario | `Europe/Madrid` |
+| Moneda | `EUR` |
+| País | `ES` |
+| Idioma | `es` |
+| Dominio | marianmadrid.es |
+| Runtime | Wix Velo V2/V3 · Backend serverless · ES Modules |
+| Motor de reservas | Wix Bookings V2 (`wix-bookings.v2`) — uso exclusivo V2 |
+| Modelo de reserva | Servicios simples + servicios duales con gap de exposición (F1 → exposición → F2) |
+| Modelo de recurso | Un recurso por slot · NO multiservice · 3 profesionales |
+| Estándar de código | G10 ASCII Strict |
+| Marco normativo | SIF/Veri*factu (RD 1007/2023, Orden HAC/1177/2024), IVA, PGC, Registro Horario (Art. 34.9 ET, RD-ley 8/2019), RGPD/LOPDGDD |
+| Canales operativos | Reservas online (Bookings V2 custom), TPV salón, Pasarela Wix Payments V2, Tienda online (Wix Stores V1) |
+
+**Horario del negocio**: L-V 9h–20h · S 8:30h–14:30h. Los tres profesionales usan calendarios personalizados independientes, no vinculados al horario predeterminado.
+
+---
+
+## BLOQUE 2 — PERSONAL Y RECURSOS WIX
+
+### 2.1 Personal activo (fuente: `MapaStaff`)
+
+| Profesional | Email | resourceId | scheduleId | Rol |
+|---|---|---|---|---|
+| MARIAN MADRID | `marian@marianmadrid.es` | `e556070a-6d6a-402e-8422-11133033ea76` | `06af20d4-1ec3-49fa-9075-f0691dfa7fd4` | PROPIETARIA / ADMIN |
+| ANDREA STAFF | `andrea@marianmadrid.es` | `07f7344f-e7e4-4c53-854b-47fd82ac8d40` | `a494b829-8161-4b84-b78d-6ffed45b4abe` | ESTILISTA |
+| ALBA STAFF | `alba@marianmadrid.es` | `9b905bfd-1a09-485d-9273-a24a20dfe648` | `94b8980d-63f4-43b1-ba86-41075e0eb63c` | ESTILISTA |
+
+### 2.2 Recursos Wix globales
+
+| Constante | Valor |
+|---|---|
+| `STAFF_RESOURCE_TYPE_ID` | `1cd44cf8-756f-41c3-bd90-3e2ffcaf1155` |
+| `MARIAN_MANAGEMENT_RESOURCE_ID` | `e556070a-6d6a-402e-8422-11133033ea76` |
+| `LOCATION_ID` | `7a12abfd-bf30-4847-bcdf-00dc573d4802` |
+| `STAFF_ACCESS.ALLOWED_ROLES` | `["ADMIN", "GESTION", "ESTILISTA"]` |
+
+> **Regla**: `STAFF_RESOURCE_TYPE_ID` se pasa explícitamente en cada llamada de disponibilidad para filtrar solo recursos de tipo personal (evita slots de equipos/salas).
+
+---
+
+## BLOQUE 3 — WIX APPS NATIVAS INSTALADAS
+
+| App | App ID | Versión/Uso | Misión |
+|---|---|---|---|
+| Wix Bookings | `13d21c63-b5ec-5912-8397-c3a5ddb27a97` | **V2 exclusivo** | Recursos, servicios, disponibilidad, reservas |
+| Wix Stores | `1380b703-ce81-ff05-f115-39571d94eab3` | **Catalog V1** (no V3 sin migración formal) | Catálogo productos físicos, stock |
+| Wix Events | `140603ad-af8d-84fb-9004-ee174e35054d` | Auxiliares | Eventos fuera del flujo transaccional |
+| Wix Forms & Payments | `14ce1214-b278-a7e4-1373-00cebd1bef7c` | V2 | Cobros online, webhook eCommerce |
+| Wix Invoices | `13ee94c1-b635-8505-3391-97919052c16f` | Escritura delegada a `cajas.web.js` | Facturación documental |
+| Wix Members Area | `14cc59bc-f0b7-15b8-e1c7-89ce41d0e0c9` | V2 | Autenticación, roles, acceso |
+| Wix Gift Cards | `d80111c5-a0f4-47a8-b63a-65b54d774a27` | Requiere conciliación | Tarjetas regalo |
+
+### 3.1 SDKs Backend utilizados
+
+| SDK | Misión |
+|---|---|
+| `wix-bookings.v2` | bookings / services / availabilityCalendar / availabilityTimeSlots |
+| `wix-ecom-backend` | checkout / orders |
+| `wix-auth` (`elevate`) | Elevación segura en cron jobs y webhooks |
+| `wix-data` (`wixData`) | Acceso a colecciones CMS |
+| `wix-secrets-backend` (`getSecret`) | Claves y secretos |
+| `wix-crypto` | createHash / createHmac / timingSafeEqual |
+
+### 3.2 Webhooks (estado actual y requerido)
+
+| Webhook | Estado | Colección/destino |
+|---|---|---|
+| `post_webhook_m365` | Implementado (con validación HMAC) | `M365GraphSyncQueue` |
+| `post_webhook_payment` (Wix Payments/Cashier) | **PENDIENTE** — requerido por DOSSIER CAJA §3 y BIBLIA §2 | `MovimientosCaja`, `CitasF2` |
+| `post_webhook_order` (Wix eCommerce) | **PENDIENTE** — requerido por DOSSIER CAJA §10 | `MovimientosCaja`, `MovimientosInventario`, `AsientosContables` |
+
+---
+
+## BLOQUE 4 — REGLAS DE NOMENCLATURA (Decreto v5002.5)
+
+| # | Regla | Descripción | Ejemplo correcto | Prohibido |
+|---|---|---|---|---|
+| R1 | Dualidad de identidad | Todo campo tiene exactamente dos IDs: Visible (ES) para dashboard + Técnica (EN/Field Key) para código | `tituloServicio` / `title` | Una sola identidad |
+| R2 | Traducción literal conservando orden | La traducción al ES conserva el orden de palabras del EN, camelCase sin espacios | `serviceId` → `servicioId`; `taxableAmount` → `gravableCantidad` | `idServicio`; `cantidadGravable` |
+| R3 | Diferenciación por contexto | Concepto en múltiples colecciones lleva sufijo contextual | `descripcionServicio` vs `descripcionComplemento` | `description` genérico |
+| R4 | Términos intraducibles | `slot`, `lock`, `staff` NO se traducen | `slotF1`, `slotKey`, `nombreStaff` | `ranuraF1`, `cerrojoClave`, `empleado` |
+| R5 | Restricciones sintácticas | Cero tildes, espacios, guiones, preposiciones, caracteres especiales; camelCase estricto | `operacionFecha` | `operaciónFecha`, `fecha de operación` |
+| R6 | Alineación nativa Wix V2 | IDs Técnicas coinciden con propiedades de APIs Wix V2 | `bookingId`, `serviceId`, `resourceId`, `transactionId`, `orderId`, `refundId`, `wixProductId` | `booking_id`, `service_guid` |
+| R7 | Cero legacy | Prohibidos y purgados todos los identificadores legacy | `serviceId`, `linkedPhases`, `resourceId` | `primaryServiceGuid`, `secondaryServiceGuid` |
+
+### 4.1 Identidades legacy prohibidas (`forbiddenLegacyIds`)
+
+| ID prohibida | Sustituto canónico |
+|---|---|
+| `primaryServiceGuid` | `serviceId` |
+| `secondaryServiceGuid` | `linkedPhases` |
+| `staffId` | `resourceId` |
+| `empleada` (como campo técnico) | `staff` o `resource` |
+| `lockKey` (como field key) | `slotKey` |
+| `resourceName` | `displayName` / `nombreStaff` |
+| `MmLocks` | `SlotLocks` |
+| `CONCILIACION_STOCK_WIX` | `MovimientosInventario` |
+| `SYNC_M365` | `M365GraphSyncQueue` |
+| `AVAILABILITY_SLOTS_CACHE` | `DualSlotCache` |
+
+### 4.2 Términos intraducibles
+
+| Término | Aplicación |
+|---|---|
+| `slot` | `slotF1`, `slotF2`, `slotKey`, `slotClave` |
+| `lock` | `SlotLocks`, `lockPropietarioId` |
+| `staff` | `nombreStaff`, `staffMiembroId`, `disponibleStaff` |
+
+### 4.3 Nomenclatura canónica v19.6 (reservas)
+
+| Dominio | Nombre canónico | No usar |
+|---|---|---|
+| Servicio principal | `serviceId` | `primaryServiceGuid`, `bookingsServiceId` |
+| Servicio F2 | `linkedPhases` | `secondaryServiceGuid`, `f2ServiceId` |
+| Fases internas (Saga/caché) | `phase1ServiceId`, `phase2ServiceId` | `phaseOneServiceId`, `serviceIdF1` |
+| Profesional | `resourceId` | `staffId`, `empleada` |
+| Búsqueda de personal | `findStaff(identifier)` | Mapas locales o búsquedas lineales |
+| Reserva dual | `pairToken` | UUID aleatorio por reintento |
+| Lock físico | `slotKey` | Usar `pairToken` como lock |
+
+> **Resolución de conflicto NOM-06/NOM-07**: Se unifica a `phase1ServiceId` / `phase2ServiceId` (formato numérico) en TODOS los contextos (colección, código, documentación). Queda derogado `phaseOneServiceId` / `phaseTwoServiceId`.
+
+---
+
+## BLOQUE 5 — BIBLIA DE CONSTANTES
+
+### 5.1 `SDK_CONFIG`
+
+| Constante | Valor |
+|---|---|
+| `TZ` | `Europe/Madrid` |
+| `LOCATION_ID` | `7a12abfd-bf30-4847-bcdf-00dc573d4802` |
+| `LOCATION_TYPES.TIME_SLOTS` | `BUSINESS` |
+| `LOCATION_TYPES.BOOKINGS_WRITER` | `OWNER_BUSINESS` |
+
+### 5.2 Timeouts (ms)
+
+| Constante | Valor | Uso |
+|---|---|---|
+| `API_MS` | 15000 | Llamadas API generales |
+| `BOOKING_CREATION_MS` | 25000 | Creación de booking |
+| `DUAL_BOOKING_MS` | 40000 | Booking dual F1+F2 |
+| `CHECKOUT_MS` | 20000 | Checkout eCommerce |
+| `CMS_MS` | 15000 | Consultas CMS |
+| `WATCHDOG_MS` | 30000 | Watchdog general |
+| `WEBHOOK_MS` | 30000 | Webhooks externos |
+
+### 5.3 Cachés (TTL ms)
+
+| Constante | Valor | Equiv. |
+|---|---|---|
+| `SERVICES_TTL_MS` | 600000 | 10 min |
+| `SLOTS_CACHE_TTL_MS` | 120000 | 2 min |
+| `DUAL_CACHE_TTL_MS` | 900000 | 15 min |
+| `STAFF_TTL_MS` | 300000 | 5 min |
+| `SECRET_CACHE_TTL_MS` | 300000 | 5 min |
+
+### 5.4 Rate Limiting
+
+| Constante | Valor | Uso |
+|---|---|---|
+| `MAX_REQUESTS` | 20 | Requests por ventana general |
+| `WINDOW_MS` | 5000 | Ventana deslizante |
+| `BOOKING_MAX_REQUESTS` | 5 | Bookings por ventana |
+| `BOOKING_WINDOW_MS` | 10000 | Ventana de bookings |
+| `AVAILABILITY_REQUESTER_MAX_REQUESTS` | 12 | Por solicitante |
+| `AVAILABILITY_GLOBAL_MAX_REQUESTS` | 120 | Global disponibilidad |
+
+### 5.5 Concurrencia, locks y transacciones
+
+| Constante | Valor | Uso |
+|---|---|---|
+| `MUTEX_TTL_MS` | 300000 | TTL de locks (5 min) |
+| `HEARTBEAT_MS` | 15000 | Renovación de locks |
+| `TRANSACTION_POLL_BASE_MS` | 250 | Poll base transacciones |
+| `TRANSACTION_MAX_WAIT_MS` | 3000 | Espera máx. transacción |
+| `LOCK_CLEANUP_GRACE_MS` | 60000 | Gracia limpieza locks |
+| `MAX_COMPENSATION_RETRIES` | 3 | Reintentos compensación |
+| `LEDGER_MUTEX_TTL_MS` | 45000 | TTL mutex ledger |
+| `JITTER_MS.min` / `JITTER_MS.max` | 400 / 1000 | Jitter creación F2 (movido desde hardcode — OPT resolución) |
+
+### 5.6 Jobs programados
+
+| Constante | Valor |
+|---|---|
+| `AUDIT_RETENTION_DAYS` | 90 |
+| `DELETE_BATCH_SIZE` | 100 |
+| `DELETE_MAX_PAGES` | 10 |
+| `FISCAL_RECOVERY_BATCH_SIZE` | 25 |
+| `BOOKINGS_SERVICE_SYNC_MAX_ATTEMPTS` | 5 |
+| `BOOKINGS_SERVICE_SYNC_BATCH_SIZE` | 20 |
+| `BOOKINGS_SERVICE_SYNC_BACKOFF_MS` | 300000 |
+| `M365_GRAPH_SYNC_BATCH_SIZE` | 20 |
+| `M365_GRAPH_SYNC_MAX_ATTEMPTS` | 3 |
+
+### 5.7 Cron jobs activos
+
+| Cron | Expresión | Función |
+|---|---|---|
+| `cleanExpiredLocks` | `15 * * * *` | Purga locks expirados en `SlotLocks` |
+| `cleanupExpiredDualCache` | `20 * * * *` | Elimina pares duales expirados de `DualSlotCache` |
+| `runPendingCompensationsJob` | `30 * * * *` | Procesa `CompensacionesPendientes` |
+| `cleanExpiredDaysCache` | `0 1 * * *` | Purga `AvailabilityDaysCache` expirados |
+| `cleanExpiredSlotsCache` | `10 1 * * *` | Purga caché RAM de slots |
+| `systemHealthCheck` | `0 7 * * *` | Comprueba BD, secretos, ledger fiscal |
+
+### 5.8 Enums de negocio (congelados con `Object.freeze`)
+
+| Enum | Valores |
+|---|---|
+| `TIPO_FICHAJE` | ENTRADA, SALIDA, PAUSA_INICIO, PAUSA_FIN, AJUSTE |
+| `TIPO_MOVIMIENTO` | VENTA_EFECTIVO, VENTA_TARJETA, VENTA_BIZUM, VENTA_ONLINE, REEMBOLSO, AJUSTE, PROPINA |
+| `FORMA_PAGO` | EFECTIVO, TARJETA, BIZUM, ONLINE |
+| `IVA_RATES` | GENERAL=0.21, REDUCIDO=0.10, SUPERREDUCIDO=0.04, EXENTO=0.0 |
+| `CAJA_STATUS` | ABIERTA, CERRADA |
+| `ESTADO_CITA` | CONFIRMED, PENDING_PAYMENT, CANCELED, REFUNDED |
+| `ESTADO_PAGO` | UNPAID, NOT_PAID, PENDING_PAYMENT, PENDING_LEDGER, PAID, REFUNDED, PARTIALLY_REFUNDED |
+| `COLLAB_ROLES` | ADMIN, GESTION, ESTILISTA |
+| `SERVICE_CATALOG.STATES` | ACTIVO, INACTIVO, BORRADOR |
+| `SERVICE_CATALOG.CURRENCY` | EUR |
+| `SERVICE_CATALOG.MAX_TITLE_LENGTH` | 160 |
+| `SERVICE_CATALOG.MAX_SUMMARY_LENGTH` | 120 |
+| `SERVICE_CATALOG.MAX_DESCRIPTION_LENGTH` | 6000 |
+| `SERVICE_CATALOG.MAX_DURATION_MINUTES` | 1440 |
+| `SLOT_SEARCH.DIAS_LIMITE` | 14 |
+| `SLOT_SEARCH.TOLERANCE_MINUTES` | 10 |
+| `JWT.ALGORITHM` | HS256 |
+| `JWT.EXPIRATION_MS` | 1800000 |
+| `SINGLETONS.CAJA` | CAJA_PRINCIPAL |
+
+> **Resolución NOM-01**: Se elimina `CITA_FIELDS.STATUS_PAGO_LEGACY = "statusPago"`. El único campo canónico es `paymentStatus`.
+
+> **Resolución NOM-08/09/10 (rol CAJERO vs GESTION)**: `CAJERO` es alias operativo de `GESTION`. Se unifica la nomenclatura a `GESTION` en todo el código. Las funciones `isCajero()` / `requireCajero()` se renombran a `isGestion()` / `requireGestion()`. El secreto `CAJERO_EMAILS` se renombra a `GESTION_EMAILS`.
+
+---
+
+## BLOQUE 6 — SECRETS MANAGER (`mmSecrets.js`)
+
+Todos los secretos se obtienen exclusivamente desde Wix Secrets Manager vía `wix-secrets-backend`. Nunca se hardcodean ni se exponen a frontend. Se cachean en memoria con `SECRET_CACHE_TTL_MS`.
+
+| Secreto | Clave | Uso |
+|---|---|---|
+| `FISCAL_KEY` | `SECRETFISCALKEY` | Clave HMAC cadena fiscal |
+| `FISCAL_NIF_EMISOR` | `FISCAL_NIF_EMISOR` | NIF emisor facturas |
+| `AUTH_JWT_KEY` | `SECRET_AUTH_JWT_KEY` | Clave JWT autenticación |
+| `ADMIN_EMAILS` | `ADMIN_EMAILS` | Emails administradores |
+| `GESTION_EMAILS` | `GESTION_EMAILS` | Emails gestión/caja (antes CAJERO_EMAILS) |
+| `POWER_AUTOMATE` | `POWER_AUTOMATE_TOKEN` | Token Power Automate |
+| `SENDGRID_API_KEY` | `SENDGRID_API_KEY` | API key SendGrid |
+| `SENDGRID_FROM_EMAIL` | `SENDGRID_FROM_EMAIL` | Remitente SendGrid |
+| `RESEND_API_KEY` | `RESEND_API_KEY` | API key Resend |
+| `RESEND_FROM_EMAIL` | `RESEND_FROM_EMAIL` | Remitente Resend |
+| `MARIAN_ASSISTANT_OPENAI_KEY` | `MARIAN_ASSISTANT_OPENAI_KEY` | OpenAI asistente |
+| `M365_GRAPH_CLIENT_ID` | `M365_CLIENT_ID` | Client ID M365 Graph |
+| `M365_GRAPH_CLIENT_SECRET` | `M365_CLIENT_SECRET` | Client Secret M365 |
+| `M365_GRAPH_TENANT_ID` | `M365_TENANT_ID` | Tenant ID M365 |
+| `M365_GRAPH_SITE_ID` | `M365_SITE_ID` | Site ID SharePoint |
+| `M365_GRAPH_LIST_ID` | `M365_LIST_ID` | List ID SharePoint |
+| `M365_WEBHOOK_HMAC_KEY` | `SECRET_M365_WEBHOOK_HMAC_KEY` | HMAC webhook M365 |
+
+---
+
+## BLOQUE 7 — COLECCIONES CMS (GOBERNANZA)
+
+### 7.1 Tipos de dato normalizados
+
+| Tipo SSOT | Tipo Wix Data CMS | Nota |
+|---|---|---|
+| `TEXT` | Text | Texto plano |
+| `NUMBER` | Number | Numérico |
+| `BOOLEAN` | Boolean | Verdadero / Falso |
+| `DATETIME` | Date & Time | Fecha y hora (no existe tipo DATE separado) |
+| `IMAGE` | Image | Imagen Wix Media |
+| `RICH_TEXT` | Rich Text | Texto enriquecido |
+| `OBJECT` | Object (JSON nativo) | **Nunca serializar como string** |
+| `TAGS` | Tags | Array de strings |
+| `REFERENCE` | Reference | Referencia simple |
+| `MULTI_REF` | Multi-Reference | Referencia múltiple (no indexar como único) |
+| `CHOICES` | TEXT + validación hook | CHOICES no existe como tipo nativo Wix Data |
+| `ARRAY` | OBJECT | Arrays de objetos como OBJECT nativo |
+| `ARRAY_STRING` | TAGS | Arrays de strings simples |
+
+### 7.2 Leyenda de índices
+
+| Código | Significado |
+|---|---|
+| `[U]` | Índice único |
+| `[S]` | Índice simple |
+| `[C]` | Índice compuesto |
+| `[F]` | Full-text search |
+| `—` | Sin índice |
+
+### 7.3 Tabla maestra de colecciones (33 = 32 canónicas + 1 auxiliar)
+
+| # | Misión | Alias COLLECTIONS | CollectionID | Display Field (visible) | Nivel despliegue |
+|---|---|---|---|---|---|
+| 0 | Auxiliar | CATEGORIAS_SERVICIO | CategoriasServicio | nombreCategoria | 0 |
+| 1 | M1 | SERVICIOS_CATALOGO | ServiciosCatalogo | tituloServicio | 1 |
+| 2 | M1 | COMPLEMENTOS_CATALOGO | ComplementosCatalogo | tituloComplemento | 1 |
+| 3 | M1 | MAPA_STAFF | MapaStaff | nombreStaff | 0 |
+| 4 | M1 | CITAS_F2 | CitasF2 | reservaId | 2 |
+| 5 | M2 | AVAILABILITY_DAYS_CACHE | AvailabilityDaysCache | idCache | 2 |
+| 6 | M2 | DUAL_SLOT_CACHE | DualSlotCache | parToken | 2 |
+| 7 | M3 | BOOKING_TRANSACTIONS | BookingTransactions | parToken | 2 |
+| 8 | M3 | BOOKINGS_SERVICE_SYNC_QUEUE | BookingsServiceSyncQueue | idCola | 2 |
+| 9 | M3 | COMPENSACIONES_PENDIENTES | CompensacionesPendientes | reservaId | 2 |
+| 10 | M3 | M365_GRAPH_SYNC_QUEUE | M365GraphSyncQueue | registroExternoId | 2 |
+| 11 | M4 | INVENTARIO_STOCK_VENTA | InventarioStockVenta | productoNombre | 3 |
+| 12 | M4 | MOVIMIENTOS_INVENTARIO | MovimientosInventario | movimientoToken | 3 |
+| 13 | M4 | INVENTARIO_STOCK_VENTA_CIERRE | InventarioStockVentaCierre | inventarioCierreId | 3 |
+| 14 | M4 | PROVEEDORES_LISTA | ProveedoresLista | proveedorNombre | 0 |
+| 15 | M5 | CAJA_ACTUAL | CajaActual | operacionFecha | 4 |
+| 16 | M5 | MOVIMIENTOS_CAJA | MovimientosCaja | facturaNumero | 4 |
+| 17 | M5 | CONTROL_PARCIAL_X | ControlParcialX | operacionFecha | 4 |
+| 18 | M5 | HISTORICO_CIERRES_Z | HistoricoCierresZ | operacionFecha | 4 |
+| 19 | M5 | SECUENCIA_TICKETS | SecuenciaTickets | idElemento | 4 |
+| 20 | M6 | CONFIGURACION_FISCAL | ConfiguracionFiscal | negocioNombre | 0 |
+| 21 | M6 | LIBRO_IVA_FACTURAS_EXPEDIDAS | LibroIVAFacturasExpedidas | facturaNumero | 5 |
+| 22 | M6 | LIBRO_IVA_FACTURAS_RECIBIDAS | LibroIVAFacturasRecibidas | recepcionNumero | 5 |
+| 23 | M6 | PLAN_CUENTAS_CONTABLES | PlanCuentasContables | cuentaNombre | 5 |
+| 24 | M6 | ASIENTOS_CONTABLES | AsientosContables | asientoNumero | 5 |
+| 25 | M6 | LINEAS_ASIENTO_CONTABLE | LineasAsientoContable | lineaAsientoId | 5 |
+| 26 | M6 | LIBRO_MAYOR_CONTABLE_SALDOS | LibroMayorContableSaldos | cuentaCodigo | 5 |
+| 27 | M7 | EVENTOS_SISTEMA_FACTURACION | EventosSistemaFacturacion | sistemaEventoId | 6 |
+| 28 | M7 | MM_AUDIT_LOG | MmAuditLog | eventoTipo | 6 |
+| 29 | M7 | REGISTROS_HORARIOS_STAFF | RegistrosHorariosStaff | registradoFecha | 6 |
+| 30 | Infra | SLOT_LOCKS | SlotLocks | slotClave | 2 |
+| 31 | Infra | RATE_LIMIT_BLOCKS | RateLimitBlocks | idElemento | 7 |
+| 32 | Infra | ALERTAS_OPERATIVAS | AlertasOperativas | idElemento | 7 |
+
+> **Resolución SSOT-15 (display fields)**: Se adoptan las IDs VISIBLES en español como display fields (criterio ESQUEMA v5002.5). Queda derogado el uso de IDs técnicas como display field.
+>
+> **Resolución SSOT-16/17/18 (SlotLocks)**: Display field de `SlotLocks` es `slotClave` (field key `slotKey`). Prohibido usar `lockKey` como field key.
+>
+> **Resolución SSOT-08 (SlotLocks en despliegue)**: `SlotLocks` se despliega en Nivel 2 (Transaccional), no Nivel 7, porque la Saga de reservas lo necesita antes que las colecciones de caja.
+>
+> **Detalle de campos**: La definición exhaustiva de campos, tipos, índices y relaciones por colección está en `SSOT.json` (machine-readable) y `ESQUEMA CMS NORMALIZADO` §4.00 a §4.32. Este SSOT no los duplica.
+
+### 7.4 Campos OBJECT nativos (nunca serializar)
+
+Aplica a: `meta`, `contactDetails`, `lineItems`, `slotF1`, `slotF2`, `desiredPayload`, `result`, `secureDetail`, `data`, `movementTypeBreakdown`, `taxTypeBreakdown`, `sequenceCounters`, `metaHorario`.
+
+### 7.5 Campos TAGS
+
+Aplica a: `availableDays` (AvailabilityDaysCache), `candidateResourceIds` (DualSlotCache).
+
+---
+
+## BLOQUE 8 — HOOKS DE INMUTABILIDAD Y VALIDACIÓN (TABLA ÚNICA CANÓNICA)
+
+> **Resolución SSOT-04/05/06/07**: Esta tabla unifica los hooks listados en ESQUEMA §7 (13), BIBLIA §11 (11+18) y DOSSIER CAJA §24 (16). Es la referencia definitiva. Total: 26 hooks sobre 12 colecciones + validaciones de enum.
+
+| Colección | Hook | Acción | Excepción |
+|---|---|---|---|
+| ServiciosCatalogo | beforeInsert | Validar esquema: `phase1Duration + exposureDuration + phase2Duration === totalDuration` | SCHEMA_VIOLATION |
+| ServiciosCatalogo | beforeUpdate | Validar esquema | SCHEMA_VIOLATION |
+| MapaStaff | beforeInsert | Validar unicidad de `resourceId` y `staffMemberId` | SCHEMA_VIOLATION |
+| MapaStaff | beforeUpdate | Validar unicidad de `resourceId` y `staffMemberId` | SCHEMA_VIOLATION |
+| CitasF2 | beforeInsert | Validar campos canónicos y enums | SCHEMA_VIOLATION |
+| CitasF2 | beforeUpdate | Validar campos canónicos y enums | SCHEMA_VIOLATION |
+| CajaActual | beforeInsert | Singleton protegido | SINGLETON_VIOLATION |
+| CajaActual | beforeUpdate | Singleton protegido | SINGLETON_VIOLATION |
+| CajaActual | beforeRemove | Prohibido | SINGLETON_VIOLATION |
+| MovimientosCaja | beforeInsert | Validar cadena hash: `previousRecordHash`, `sequenceNumber` consecutivo, `digitalSignature` válida | FISCAL_VIOLATION |
+| MovimientosCaja | beforeUpdate | Prohibido | FISCAL_VIOLATION |
+| MovimientosCaja | beforeRemove | Prohibido | FISCAL_VIOLATION |
+| HistoricoCierresZ | beforeUpdate | Prohibido | FISCAL_VIOLATION |
+| HistoricoCierresZ | beforeRemove | Prohibido | FISCAL_VIOLATION |
+| EventosSistemaFacturacion | beforeUpdate | Prohibido | SIF_VIOLATION |
+| EventosSistemaFacturacion | beforeRemove | Prohibido | SIF_VIOLATION |
+| RegistrosHorariosStaff | beforeInsert | Validar fichaje (secuencia, día) | LABOR_LOG_VIOLATION |
+| RegistrosHorariosStaff | beforeUpdate | Prohibido | LABOR_LOG_VIOLATION |
+| RegistrosHorariosStaff | beforeRemove | Prohibido | LABOR_LOG_VIOLATION |
+| AsientosContables | beforeUpdate | Bloquear si `entryStatus` es POSTED o LOCKED | ACCOUNTING_VIOLATION |
+| AsientosContables | beforeRemove | Bloquear si `entryStatus` es POSTED o LOCKED | ACCOUNTING_VIOLATION |
+| LineasAsientoContable | beforeUpdate | Bloquear si asiento padre está posteado | ACCOUNTING_VIOLATION |
+| LineasAsientoContable | beforeRemove | Bloquear si asiento padre está posteado | ACCOUNTING_VIOLATION |
+| SecuenciaTickets | beforeUpdate | Validar que no exista salto regresivo no autorizado | SEQUENCE_VIOLATION |
+| InventarioStockVentaCierre | beforeUpdate | Bloquear cierre firmado | INVENTORY_VIOLATION |
+| InventarioStockVentaCierre | beforeRemove | Bloquear cierre firmado | INVENTORY_VIOLATION |
+
+### 8.1 Validaciones de enum (27 campos CHOICES → TEXT)
+
+Además de los hooks de inmutabilidad, cada campo CHOICES normalizado a TEXT debe validarse en `beforeInsert`/`beforeUpdate` contra su enum correspondiente de `internalConfig.js`. Si el valor no está en el enum, lanzar `SCHEMA_VIOLATION`. Los 27 campos y sus enums están listados en `ESQUEMA CMS NORMALIZADO` §5 "Detalle de campos CHOICES normalizados a TEXT".
+
+---
+
+## BLOQUE 9 — MÓDULOS BACKEND (INVENTARIO CANÓNICO)
+
+> **Regla inquebrantable**: Ningún módulo fuera de esta lista puede crear reservas, checkouts, locks o escrituras transaccionales. Todo módulo adicional debe ser inventariado aquí con su matriz de acceso a colecciones.
+
+### 9.1 Módulos canónicos (16 backend)
+
+| Módulo | Misión | Colecciones que ESCRIBE | Colecciones que LEE |
+|---|---|---|---|
+| `internalConfig.js` | Constantes, enums, coleccións, App IDs | — | — |
+| `booking/bookingCore.js` | Primitivas atómicas (locks, transacciones, Wix Bookings V2, persistencia CitasF2) | CitasF2, BookingTransactions, SlotLocks | ServiciosCatalogo, MapaStaff, DualSlotCache |
+| `booking/bookingSaga.js` | Orquestador Saga compensable (F1+F2) | CitasF2, BookingTransactions, SlotLocks, CompensacionesPendientes, DualSlotCache | ServiciosCatalogo, MapaStaff |
+| `citasManager.web.js` | Confirmación pagos, reprogramaciones, validación estado | CitasF2, MmAuditLog | CitasF2, BookingTransactions |
+| `reservas.web.js` | Disponibilidad, slots duales, balanceo, caché | AvailabilityDaysCache, DualSlotCache | ServiciosCatalogo, MapaStaff, CitasF2 |
+| `cajas.web.js` | Caja, ledger, arqueos X, cierres Z, IVA, integridad | MovimientosCaja, CajaActual, ControlParcialX, HistoricoCierresZ, SecuenciaTickets, LibroIVAFacturasExpedidas, LibroIVAFacturasRecibidas, AsientosContables, LineasAsientoContable, LibroMayorContableSaldos, EventosSistemaFacturacion | ConfiguracionFiscal, PlanCuentasContables, CitasF2 |
+| `horario.web.js` | Fichajes laborales inmutables | RegistrosHorariosStaff, MmAuditLog | MapaStaff |
+| `security.js` | RBAC, rate limiting | RateLimitBlocks | MapaStaff |
+| `security.web.js` | WebMethods de acceso | — | MapaStaff |
+| `securityEngine.js` | SHA256, HMAC, hash chain, JWT | — | — |
+| `staff.js` | Catálogo personal, búsqueda O(1) | — | MapaStaff |
+| `bookingServiceSync.js` | Cola sync CMS ↔ Bookings | BookingsServiceSyncQueue | ServiciosCatalogo |
+| `http-functions.js` | Endpoints HTTP (webhooks) | M365GraphSyncQueue, MovimientosCaja, MovimientosInventario, AsientosContables | — |
+| `inventario.web.js` | Inventario y conciliación Wix Stores | InventarioStockVenta, MovimientosInventario, InventarioStockVentaCierre, AlertasOperativas | ProveedoresLista |
+| `responseUtils.js` | AppError, successResponse, errorResponse | — | — |
+| `data.js` | Hooks de inmutabilidad y validación | — | Todas (vía hooks) |
+
+### 9.2 Módulos adicionales detectados (requieren justificación o refactorización)
+
+> **Resolución FRIC-01 a FRIC-07**: Los siguientes módulos aparecen en el repositorio pero NO están en el inventario canónico. Antes de cualquier despliegue deben ser (a) justificados y documentados aquí con su matriz de acceso, o (b) refactorizados hacia el módulo canónico correspondiente, o (c) eliminados si realizan escrituras transaccionales fuera de ruta.
+
+| Módulo | Estado | Acción requerida |
+|---|---|---|
+| `contabilidad.js` | No inventariado | Justificar o refactorizar hacia `cajas.web.js` |
+| `crons.js` | No inventariado | Los cron handlers deben estar en `jobs.config` o módulos canónicos |
+| `facturasRecibidas.web.js` | No inventariado | Justificar o refactorizar hacia `cajas.web.js` |
+| `fiscalAggregator.web.js` | No inventariado | Justificar o refactorizar |
+| `fiscalDocuments.web.js` | No inventariado | Justificar o refactorizar |
+| `m365GraphSync.js` | No inventariado | La sync M365 debe estar en `http-functions.js` + `M365GraphSyncQueue` |
+| `marianAssistant.web.js` | No inventariado | Justificar; verificar que no accede a datos fiscales sin autorización |
+
+### 9.3 Helpers frontend / público (4)
+
+| Módulo | Misión |
+|---|---|
+| `public/mmUtils.js` | Helpers seguros (traceId, timezone, enmascarado PII, validación) |
+| `public/widgetBridge.js` | Comunicación postMessage entre widgets y página |
+| `public/qrHelper.js` | QR Veri*factu y HTML de recibo fiscal |
+| `public/marianAdministrationController.js` | Controlador widget administración |
+
+> **Nota**: El inventario detallado de funciones por módulo está en `BIBLIA DEFINITIVA.md` Bloques 12 y 13. Este SSOT no lo duplica, pero lo referencia como válido para los 16+4 módulos canónicos.
+
+---
+
+## BLOQUE 10 — MOTOR DE RESERVAS (FLUJO CONSOLIDADO)
+
+### 10.1 Arquitectura de tres capas
+
+| Capa | Módulo | Responsabilidad |
+|---|---|---|
+| Disponibilidad | `reservas.web.js` | Consulta Wix Bookings V2, construcción de slots duales, balanceo, caché multicapa |
+| Orquestación | `bookingSaga.js` | Saga compensable, locks, idempotencia, creación paralela F1+F2 |
+| Primitivas | `bookingCore.js` | Acceso a Wix Bookings V2, locks, transacciones, persistencia CitasF2 |
+
+### 10.2 Modelo de servicio dual con gap
+
+| Campo CMS | Tipo | Descripción |
+|---|---|---|
+| `allowCombine` | Boolean | Habilita modo dual |
+| `linkedPhases` | Text (GUID) | serviceId del servicio F2 asociado |
+| `phase1Duration` | Number | Minutos de F1 |
+| `exposureDuration` | Number | Minutos del gap de exposición |
+| `phase2Duration` | Number | Minutos de F2 |
+
+Durante el gap de exposición, la profesional queda liberada y puede atender otros servicios simples. El slot de F2 llega al final del gap.
+
+### 10.3 Saga transaccional (pasos)
+
+| Paso | Acción | Compensación |
+|---|---|---|
+| [1] LockSlots | Adquirir locks (1 simple, 2 duales) | unlock + stop heartbeat |
+| [2] CreateBookings | Crear F1+F2 en paralelo (jitter 400-1000ms) | cancelBookingElevated por booking |
+| [3a] CreateCheckout | Pago ONLINE: crear checkout eCommerce | — |
+| [3b] ConfirmPresencial | Pago PRESENCIAL: confirmar con NOT_PAID | — |
+
+### 10.4 Idempotencia (tres capas)
+
+1. **pairToken estable (determinista)**: `SHA256(serviceId + resourceId + f1Start + f2Start) + emailHash`
+2. **BookingTransactions**: `transactionId = SHA256(pairToken + payloadHash)[:16]`
+3. **Query por pairToken en CitasF2**: Si existe con PENDING_PAYMENT → devolver checkoutUrl existente; si otro estado → devolver confirmación existente.
+
+### 10.5 Locks distribuidos
+
+| Aspecto | Valor |
+|---|---|
+| Colección | `SlotLocks` |
+| Formato clave | `lock:<serviceId>:<resourceId>:<localStartTime>` |
+| TTL | 300 segundos |
+| Heartbeat | Cada 15 segundos (`_renewLock`) |
+| Adquisición | Query → si existe lock activo con otro ownerId → `TOKEN_BUSY`; si no → INSERT |
+
+### 10.6 Caché multicapa
+
+| Capa | Almacén | TTL | Invalidación |
+|---|---|---|---|
+| RAM (4 Maps) | Instancia serverless | 120s-600s | `purgeExpiredRamCaches()` por cron |
+| `AvailabilityDaysCache` | Wix Data | Por mes/servicio | Event-driven tras reserva confirmada |
+| `DualSlotCache` | Wix Data | 15 min | TTL + cron + **invalidación individual por pairToken consumido** (resolución FRIC-16/17) |
+
+### 10.7 Limitaciones pendientes (deben resolverse antes de despliegue)
+
+| Limitación | Resolución requerida |
+|---|---|
+| `_persistBooking` no escribe campos canónicos de CitasF2 | Reescribir para insertar `serviceId`, `resourceId`, `dateYmd`, `startDate`, `endDate`, `pairToken`, `bookingType`, `status`, `paymentStatus`, `contactDetails`, `traceId` |
+| `meta` serializado como JSON.stringify | Pasar objeto JavaScript directamente (OBJECT nativo) |
+| Rate limiter sin persistencia de violaciones | `rateLimiter()` debe insertar en `RateLimitBlocks`; `isKeyPersistentlyBlocked()` debe consultar la colección |
+| Caché dual sin invalidación individual | Borrar solo el documento de `DualSlotCache` con `_id === pairToken` consumido |
+| `_resolveStaffForSlotInternal` es stub | Implementar consulta real a Wix Bookings V2 con `skipCache: true` |
+
+---
+
+## BLOQUE 11 — CAJA, CONTABILIDAD, INVENTARIO Y CUMPLIMIENTO (FLUJO CONSOLIDADO)
+
+### 11.1 Ruta correcta de toda operación económica
+
+```
+Evento Wix o acción autorizada
+    ↓
+Validación de permisos e idempotencia
+    ↓
+Recálculo servidor (importes, impuestos, stock)
+    ↓
+Registro en ledger fiscal (MovimientosCaja)
+    ↓
+Registro contable (AsientosContables + LineasAsientoContable)
+    ↓
+Registro de auditoría (MmAuditLog + EventosSistemaFacturacion)
+    ↓
+Exportación documental al contable
+```
+
+### 11.2 Flujos económicos (17)
+
+| Flujo | Origen | Colecciones principales |
+|---|---|---|
+| 1. Apertura caja | Módulo interno | CajaActual, MmAuditLog |
+| 2. Cobro reserva presencial | Wix Bookings + TPV | CitasF2, MovimientosCaja, LibroIVAFacturasExpedidas, AsientosContables |
+| 3. Cobro reserva online | Wix Bookings + Payments | BookingTransactions, CitasF2, MovimientosCaja, LibroIVAFacturasExpedidas |
+| 4. Venta producto física | TPV / Stores V1 | InventarioStockVenta, MovimientosInventario, MovimientosCaja |
+| 5. Venta producto online | Wix Stores / eCommerce | MovimientosInventario, MovimientosCaja, LibroIVAFacturasExpedidas |
+| 6. Devoluciones y reembolsos | Payments / caja | MovimientosCaja, LibroIVAFacturasExpedidas, MovimientosInventario, AsientosContables, CompensacionesPendientes |
+| 7. Tarjetas regalo | Gift Cards / caja | MovimientosCaja, AsientosContables |
+| 8. Movimientos manuales caja | Manual autorizado | MovimientosCaja, LibroIVAFacturasRecibidas, AsientosContables |
+| 9. Arqueo parcial X | Caja | ControlParcialX, AlertasOperativas |
+| 10. Cierre Z | Caja | HistoricoCierresZ, EventosSistemaFacturacion |
+| 11. Contabilización automática | Todos | AsientosContables, LineasAsientoContable, LibroMayorContableSaldos |
+| 12. Facturas recibidas y gastos | Manual / proveedor | LibroIVAFacturasRecibidas, MovimientosCaja, AsientosContables |
+| 13. Compra productos y entrada inventario | Proveedor | InventarioStockVenta, MovimientosInventario, LibroIVAFacturasRecibidas |
+| 14. Ajustes y regularizaciones inventario | Inventario | MovimientosInventario, InventarioStockVenta |
+| 15. Cierre inventario valorado | Inventario | InventarioStockVentaCierre, AsientosContables |
+| 16. Registro horario laboral | Members / widget | RegistrosHorariosStaff, MmAuditLog |
+| 17. Eventos SIF / Veri*factu | Sistema | EventosSistemaFacturacion |
+
+> **Detalle de campos por flujo**: Está en `DOSSIER CAJA FÍSICA, CONTABILIDAD, INVENTARIO Y CUMPLIMIENTO NORMATIVO.md` §6 a §22. Este SSOT no lo duplica.
+
+### 11.3 Cadena de integridad y firma
+
+```
+canonicalPayload = JSON normalizado de campos fiscales del movimiento
+currentRecordHash = SHA256(canonicalPayload + previousRecordHash)
+digitalSignature = HMAC_SHA256(currentRecordHash, FISCAL_KEY)
+```
+
+`FISCAL_KEY` se obtiene exclusivamente desde Wix Secrets Manager.
+
+### 11.4 Validaciones de integridad antes de entregar al contable
+
+1. Suma de movimientos coincide con cierre Z
+2. Totales por método de pago coinciden con CajaActual
+3. Cadena hash de MovimientosCaja es válida
+4. Secuencia de tickets sin huecos no justificados
+5. Facturas rectificativas referencian documentos originales válidos
+6. Asientos cuadrados (`totalDebe === totalCredit`)
+7. Líneas de asiento suman igual al asiento
+8. Libro IVA expedidas coincide con movimientos de venta
+9. Libro IVA recibidas coincide con gastos registrados
+10. Inventario final coincide con InventarioStockVenta
+11. Reembolsos no duplicados
+12. Pagos online confirmados por eventos nativos
+13. Reservas pagadas con `paymentStatus` coherente
+14. Fichajes laborales sin modificaciones
+15. Sin eventos FISCAL_VIOLATION, SIF_VIOLATION o LABOR_LOG_VIOLATION sin resolver
+
+### 11.5 Roles y permisos
+
+| Acción | ADMIN | GESTION | ESTILISTA |
+|---|---|---|---|
+| Abrir caja | Sí | Sí | No |
+| Cobro servicio presencial | Sí | Sí | No |
+| Venta producto presencial | Sí | Sí | No |
+| Ajuste de caja | Sí | Limitado | No |
+| Devolución | Sí | Limitado | No |
+| Arqueo X | Sí | Sí | No |
+| Cierre Z | Sí | No | No |
+| Registrar gasto | Sí | Sí | No |
+| Registrar factura recibida | Sí | Sí | No |
+| Ajuste inventario | Sí | Sí | No |
+| Cierre inventario | Sí | No | No |
+| Fichaje laboral | Sí | Sí | Sí (propio) |
+| Ver libros IVA | Sí | Limitado | No |
+| Ver asientos contables | Sí | Limitado | No |
+| Exportar documentación contable | Sí | Limitado | No |
+
+---
+
+## BLOQUE 12 — ORDEN DE DESPLIEGUE (ÚNICO Y CANÓNICO)
+
+> **Resolución SSOT-08 a SSOT-14**: Se adopta el orden de 8 niveles del ESQUEMA CMS v5002.5, con la corrección de `SlotLocks` movido a Nivel 2.
+
+| Nivel | Colecciones | Acción |
+|---|---|---|
+| 0 | CategoriasServicio, ConfiguracionFiscal, ProveedoresLista, MapaStaff | Crear colecciones auxiliares y maestras. Establecer display fields. |
+| 1 | ServiciosCatalogo, ComplementosCatalogo | Crear catálogo. Configurar REFERENCE a CategoriasServicio y MULTI_REF a MapaStaff y ComplementosCatalogo. |
+| 2 | CitasF2, SlotLocks, AvailabilityDaysCache, DualSlotCache, BookingTransactions, BookingsServiceSyncQueue, CompensacionesPendientes, M365GraphSyncQueue | Crear transaccional, locks y caché. |
+| 3 | InventarioStockVenta, MovimientosInventario, InventarioStockVentaCierre | Crear inventario. |
+| 4 | CajaActual, SecuenciaTickets, MovimientosCaja, ControlParcialX, HistoricoCierresZ | Crear caja. Configurar inmutabilidad. |
+| 5 | LibroIVAFacturasExpedidas, LibroIVAFacturasRecibidas, PlanCuentasContables, AsientosContables, LineasAsientoContable, LibroMayorContableSaldos | Crear fiscal y contable. Configurar inmutabilidad. |
+| 6 | EventosSistemaFacturacion, MmAuditLog, RegistrosHorariosStaff | Crear auditoría y laboral. Configurar inmutabilidad. |
+| 7 | RateLimitBlocks, AlertasOperativas | Crear infraestructura. |
+
+---
+
+## BLOQUE 13 — RESOLUCIÓN DE CONFLICTOS SSOT (QUÉ PREVALECE)
+
+| Conflicto | Documentos en conflicto | Resolución | Prevalencia |
+|---|---|---|---|
+| Versiones SSOT fragmentadas | BIBLIA v5002.5, DOSSIER CAJA v5002.4, DOSSIER RESERVAS v5002.3 | Unificar a v5002.6-CONSOLIDADA | Este documento |
+| Display fields técnicos vs visibles | BIBLIA §9 (técnicos) vs ESQUEMA (visibles) | IDs visibles en español | ESQUEMA v5002.5 |
+| SlotLocks display field | BIBLIA §9 (`lockKey`) vs ESQUEMA (`slotClave`) | `slotClave` (field key `slotKey`) | ESQUEMA v5002.5 |
+| Conteo de hooks | ESQUEMA (13), BIBLIA (11/18), DOSSIER CAJA (16) | Tabla única de 26 hooks (Bloque 8) | Este documento |
+| Orden de despliegue | ESQUEMA (8 niveles) vs BIBLIA (6 niveles) | 8 niveles con SlotLocks en Nivel 2 | Este documento |
+| `availableStaff` OBJECT vs MULTI_REF | SSOT v5002.4 (OBJECT) vs ESQUEMA (MULTI_REF) | MULTI_REF hacia MapaStaff con migración controlada | ESQUEMA v5002.5 |
+| `addOnTitles` activo vs LEGADO | SSOT v5002.4 (activo) vs ESQUEMA (LEGADO) | LEGADO; no crear en despliegues nuevos | ESQUEMA v5002.5 |
+| `locationId` REFERENCE vs TEXT | SSOT v5002.4 (REFERENCE) vs ESQUEMA (TEXT) | TEXT (GUID nativo Wix Bookings) | ESQUEMA v5002.5 |
+| Campos CHOICES | SSOT v5002.4 (CHOICES) vs ESQUEMA (TEXT + hooks) | TEXT validado por hooks | ESQUEMA v5002.5 |
+| `availableDays` / `candidateResourceIds` | SSOT v5002.4 (ARRAY_STRING) vs ESQUEMA (TAGS) | TAGS | ESQUEMA v5002.5 |
+| `lineItems` ARRAY vs OBJECT | SSOT v5002.4 (ARRAY) vs ESQUEMA (OBJECT) | OBJECT nativo | ESQUEMA v5002.5 |
+| Colecciones M6 fields vacíos | SSOT v5002.4 (vacíos) vs ESQUEMA (completos) | Completos desde DOSSIER TÉCNICO | ESQUEMA v5002.5 |
+| `phase1ServiceId` vs `phaseOneServiceId` | ESQUEMA (numérico) vs DIRECTRICES (palabra) | `phase1ServiceId` / `phase2ServiceId` | Este documento |
+| `reservaIdVinculada` dualidad | SSOT v5002.4 (misma ID visible/técnica) | Renombrar field key técnico a `linkedBookingId`; visible `reservaIdVinculada` | Este documento |
+| Rol CAJERO vs GESTION | BIBLIA (`isCajero`) vs DOSSIER CAJA (GESTION) | Unificar a GESTION | Este documento |
+| `STATUS_PAGO_LEGACY` | BIBLIA §6 (presente) vs DIRECTRICES (ausente) | Eliminar; usar solo `paymentStatus` | Este documento |
+| Webhooks de pago y pedido | BIBLIA §2 (recomendado) vs implementación (ausente) | Implementar `post_webhook_payment` y `post_webhook_order` | Este documento |
+| Módulos extra-SSOT | Repo (7 módulos) vs BIBLIA (16) | Justificar, documentar o refactorizar | Este documento |
+
+---
+
+## BLOQUE 14 — REGLAS DE USO Y VALIDACIÓN
+
+### 14.1 Uso previsto de este SSOT
+
+1. Base de datos canónica para despliegue en Wix Data CMS
+2. Generación de tipados TypeScript/JSDoc en el backend Velo
+3. Referencia consultiva para desarrolladores, auditores y contables
+4. Contrato de nomenclatura para todas las evoluciones futuras del sitio
+5. Criterio de resolución de conflictos entre documentos
+
+### 14.2 Reglas de seguridad y auditoría
+
+| Regla | Implementación |
+|---|---|
+| Inmutabilidad fiscal/laboral | Hooks `beforeUpdate`/`beforeRemove` en `data.js` |
+| Traza transversal | `traceId` generado por `makeTraceId()` en toda inserción crítica |
+| Rate limiting | Ventana deslizante en memoria + persistencia en `RateLimitBlocks` |
+| Cero legacy | Purga de `forbiddenLegacyIds` |
+| Secretos | Exclusivamente desde Wix Secrets Manager |
+| PII | Enmascarado en logs y respuestas |
+| Pagos/pedidos | No se acepta estado local como prueba; fuente confirmatoria es evento o entidad nativa Wix |
+
+### 14.3 Ciclo de entrega obligatorio
+
+Cada cambio sigue la secuencia:
+1. Rama aislada en el repositorio
+2. Análisis de impacto sobre colecciones, APIs nativas y flujos
+3. Modificación mínima (principio de cambio quirúrgico)
+4. Pruebas estáticas (lint, tipos, reglas SSOT)
+5. Regresiones sobre flujos críticos (reserva simple, dual, cobro, caja, cierre Z)
+6. Simulación determinista con datos controlados
+7. Local Editor y preview en sitio de prueba
+8. Revisión de diferencias frente a este SSOT
+
+Solo los cambios con evidencia completa podrán proponerse para publicación. La publicación, el despliegue de cambios que afecten datos reales y cualquier cobro o devolución real requieren validación operativa independiente.
+
+### 14.4 Cumplimiento normativo — alcance técnico y validación externa
+
+| Área | Control técnico que el sistema garantiza | Validación externa requerida |
+|---|---|---|
+| Fiscal (SIF/Veri*factu) | Integridad, inmutabilidad, trazabilidad, cadena hash, firma HMAC | Asesoría fiscal |
+| Contable | Partida doble, asientos cuadrados, libro mayor, cierre inventario | Contable responsable |
+| Datos personales (RGPD/LOPDGDD) | Privacidad por diseño, roles, minimización, registros inmutables | Responsable de protección de datos |
+| Laboral (Art. 34.9 ET) | Fichajes inmutables, firma, identificación trabajador/registrador | Asesoría laboral |
+
+> El sistema no puede autocertificar el cumplimiento legal completo. "100% cumplimiento" es una meta de validación externa documentada, no una afirmación que el código pueda autocertificar.
+
+### 14.5 Referencias canónicas
+
+| Fuente | URL |
+|---|---|
+| Wix: Working with Payments, Transactions, and Orders | https://dev.wix.com/docs/api-reference/business-solutions/e-commerce/payments/working-with-payments-transactions-and-orders |
+| Wix: Create Checkout | https://dev.wix.com/docs/velo/apis/wix-ecom-backend/checkout/create-checkout |
+| AEAT: Sistemas Informáticos de Facturación y VERIFACTU | https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu.html |
+| AEPD: Responsabilidad proactiva | https://www.aepd.es/preguntas-frecuentes/2-tus-obligaciones-como-responsable-del-tratamiento/4-los-principios-del-tratamiento/FAQ-0208-que-es-el-principio-de-responsabilidad-proactiva |
+
+---
+
+## DICTAMEN FINAL DEL GUARDIAN
+
+Este SSOT CONSOLIDADO v5002.6 unifica y resuelve las inconsistencias de los 5 documentos base. Constituye la ÚNICA Fuente de Verdad del ecosistema Marian Madrid.
+
+**Cumplimiento de normalización**: Las 7 reglas del Decreto v5002.5 se aplican en las 33 colecciones. Los términos `slot`, `lock`, `staff` permanecen intraducibles. El orden de traducción es estrictamente literal respecto al inglés.
+
+**Alineación nativa**: Todas las IDs técnicas críticas (`bookingId`, `serviceId`, `resourceId`, `scheduleId`, `transactionId`, `orderId`, `refundId`, `wixProductId`, `wixVariantId`) coinciden exactamente con los contratos de los SDKs de Wix V2 y Wix Stores V1.
+
+**Validez como SSOT**: Este documento, junto con `SSOT.json` (machine-readable) y `ESQUEMA CMS NORMALIZADO` (tablas exhaustivas), constituye la Fuente Única de Verdad. Anula cualquier discrepancia previa entre los documentos base.
+
+**Pendientes críticos antes de despliegue**: Los 5 items del Bloque 10.7 (motor de reservas) y los 2 webhooks pendientes del Bloque 3.2 (pago y pedido) deben resolverse antes de cualquier despliegue a producción.
+
+---
+
+*Fin del SSOT CONSOLIDADO v5002.6*
+*Guardian: Velo Code Guardian*
+*Fecha de emisión: 2026-09-14*
+*Documentos sustituidos: BIBLIA DEFINITIVA v5002.5, ESQUEMA CMS NORMALIZADO v5002.5, SSOT.json v5002.5-corregida, DOSSIER MOTOR RESERVAS v0609, DOSSIER CAJA v5002.4, DIRECTRICES V19*
+
+---
+
+**Nota de entrega**: Este documento se entrega como bloque único consolidado. Si necesitas que algún bloque específico se expanda con mayor detalle (por ejemplo, el inventario completo de funciones por módulo, o las tablas exhaustivas de campos por colección), indícalo y lo entrego como anexo independiente, manteniendo este SSOT como referencia de gobernanza.

@@ -1,0 +1,355 @@
+# SSOT MARIAN MADRID — RESUMEN EJECUTIVO PRIORIZADO
+## Versión v5002.6-CONSOLIDADA · Documento único de verdad · Wix Velo V2/V3
+
+---
+
+## 🔴 PRIORIDAD 1 — IDENTIDAD Y CONTEXTO INNEGOCIABLE
+
+| Aspecto | Valor fijo |
+|---|---|
+| Negocio | Marian Madrid Peluquería y Estética · Zaragoza |
+| Site ID | `188bed94-177c-4bc9-a9f0-35080d874f3e` |
+| Location ID | `7a12abfd-bf30-4847-bcdf-00dc573d4802` |
+| STAFF_RESOURCE_TYPE_ID | `1cd44cf8-756f-41c3-bd90-3e2ffcaf1155` |
+| TZ / Moneda / Idioma | `Europe/Madrid` · `EUR` · `es` |
+| Runtime | Wix Velo V2/V3 · Backend serverless · ES Modules · G10 ASCII |
+| Motor reservas | Wix Bookings V2 exclusivo (cero V1) |
+| Modelo personal | 3 profesionales · recurso único por slot · NO multiservice |
+| Marco legal | SIF/Veri*factu · IVA · PGC · Art. 34.9 ET · RGPD/LOPDGDD |
+
+### Personal activo (MapaStaff)
+
+| Profesional | resourceId | Rol |
+|---|---|---|
+| MARIAN MADRID | `e556070a-6d6a-402e-8422-11133033ea76` | ADMIN |
+| ANDREA STAFF | `07f7344f-e7e4-4c53-854b-47fd82ac8d40` | ESTILISTA |
+| ALBA STAFF | `9b905bfd-1a09-485d-9273-a24a20dfe648` | ESTILISTA |
+
+---
+
+## 🔴 PRIORIDAD 2 — REGLAS DE NOMENCLATURA (DECRETO v5002.5)
+
+> **Cero excepciones. Toda ID, campo, función y colección cumple estas 7 reglas.**
+
+| # | Regla | Ejemplo correcto | Prohibido |
+|---|---|---|---|
+| R1 | Dualidad: ID Visible ES + ID Técnica EN | `tituloServicio` / `title` | Una sola identidad |
+| R2 | Traducción literal conservando orden | `serviceId` → `servicioId` | `idServicio` |
+| R3 | Sufijo contextual en duplicados | `descripcionServicio` | `description` genérico |
+| R4 | Intraducibles: `slot`, `lock`, `staff` | `slotF1`, `nombreStaff` | `ranuraF1`, `empleado` |
+| R5 | Cero tildes/espacios/guiones/preposiciones | `operacionFecha` | `operaciónFecha` |
+| R6 | IDs técnicas = propiedades Wix V2 API | `bookingId`, `resourceId` | `booking_id` |
+| R7 | Cero legacy | `serviceId`, `linkedPhases` | `primaryServiceGuid` |
+
+### Identidades legacy PROHIBIDAS (purga obligatoria)
+
+```
+primaryServiceGuid → serviceId
+secondaryServiceGuid → linkedPhases
+staffId → resourceId
+empleada → staff | resource
+lockKey (field key) → slotKey
+resourceName → displayName | nombreStaff
+MmLocks → SlotLocks
+CONCILIACION_STOCK_WIX → MovimientosInventario
+SYNC_M365 → M365GraphSyncQueue
+AVAILABILITY_SLOTS_CACHE → DualSlotCache
+```
+
+---
+
+## 🔴 PRIORIDAD 3 — COLECCIONES CMS (33 = 32 CANÓNICAS + 1 AUXILIAR)
+
+### Orden de despliegue obligatorio
+
+| Nivel | Colecciones | Inmutabilidad |
+|---|---|---|
+| **0** Auxiliares | CategoriasServicio · ConfiguracionFiscal · ProveedoresLista · MapaStaff | Validación |
+| **1** Catálogo | ServiciosCatalogo · ComplementosCatalogo | Validación esquema |
+| **2** Transaccional | CitasF2 · SlotLocks · AvailabilityDaysCache · DualSlotCache · BookingTransactions · BookingsServiceSyncQueue · CompensacionesPendientes · M365GraphSyncQueue | Transaccional |
+| **3** Inventario | InventarioStockVenta · MovimientosInventario · InventarioStockVentaCierre | Inmutable movimientos |
+| **4** Caja | CajaActual · SecuenciaTickets · MovimientosCaja · ControlParcialX · HistoricoCierresZ | **FISCAL_VIOLATION** |
+| **5** Fiscal/Contable | LibroIVAFacturasExpedidas · LibroIVAFacturasRecibidas · PlanCuentasContables · AsientosContables · LineasAsientoContable · LibroMayorContableSaldos | Bloqueo POSTED |
+| **6** Auditoría/Laboral | EventosSistemaFacturacion · MmAuditLog · RegistrosHorariosStaff | **SIF_VIOLATION** / **LABOR_LOG_VIOLATION** |
+| **7** Infraestructura | RateLimitBlocks · AlertasOperativas | TTL based |
+
+### Tipos de dato normalizados
+
+| Tipo SSOT | Tipo Wix Data | Nota crítica |
+|---|---|---|
+| CHOICES | TEXT + hook validación | CHOICES no existe en Wix Data |
+| ARRAY_STRING | TAGS | `availableDays`, `candidateResourceIds` |
+| ARRAY | OBJECT nativo | **Nunca** `JSON.stringify` |
+| MULTI_REF | Multi-Reference | `availableStaff` → MapaStaff |
+
+---
+
+## 🔴 PRIORIDAD 4 — HOOKS DE INMUTABILIDAD (26 HOOKS · 12 COLECCIONES)
+
+> **Estos hooks son la base del cumplimiento legal. Su ausencia = vulnerabilidad fiscal/laboral.**
+
+| Colección | Hook | Excepción |
+|---|---|---|
+| **MovimientosCaja** | beforeInsert (hash chain) · beforeUpdate · beforeRemove | FISCAL_VIOLATION |
+| **HistoricoCierresZ** | beforeUpdate · beforeRemove | FISCAL_VIOLATION |
+| **EventosSistemaFacturacion** | beforeUpdate · beforeRemove | SIF_VIOLATION |
+| **RegistrosHorariosStaff** | beforeInsert · beforeUpdate · beforeRemove | LABOR_LOG_VIOLATION |
+| **CajaActual** | beforeInsert · beforeUpdate · beforeRemove | SINGLETON_VIOLATION |
+| **ServiciosCatalogo** | beforeInsert · beforeUpdate | SCHEMA_VIOLATION |
+| **MapaStaff** | beforeInsert · beforeUpdate | SCHEMA_VIOLATION |
+| **AsientosContables** | beforeUpdate · beforeRemove | ACCOUNTING_VIOLATION |
+| **LineasAsientoContable** | beforeUpdate · beforeRemove | ACCOUNTING_VIOLATION |
+| **SecuenciaTickets** | beforeUpdate | SEQUENCE_VIOLATION |
+| **InventarioStockVentaCierre** | beforeUpdate · beforeRemove | INVENTORY_VIOLATION |
+
+---
+
+## 🔴 PRIORIDAD 5 — MÓDULOS CANÓNICOS (16 BACKEND + 4 FRONTEND)
+
+> **Regla inquebrantable**: Ningún módulo fuera de esta lista crea reservas, checkouts, locks ni escrituras transaccionales.
+
+### Backend (16 módulos)
+
+| Módulo | Misión principal | Colecciones que escribe |
+|---|---|---|
+| `internalConfig.js` | Constantes, enums, colecciones, App IDs | — |
+| `booking/bookingCore.js` | Primitivas atómicas, locks, Wix Bookings V2 | CitasF2, BookingTransactions, SlotLocks |
+| `booking/bookingSaga.js` | Orquestador Saga, idempotencia, F1+F2 | CitasF2, BookingTransactions, SlotLocks, CompensacionesPendientes, DualSlotCache |
+| `citasManager.web.js` | Confirmación pagos, reprogramaciones | CitasF2, MmAuditLog |
+| `reservas.web.js` | Disponibilidad, slots duales, balanceo, caché | AvailabilityDaysCache, DualSlotCache |
+| `cajas.web.js` | Caja, ledger, arqueos X, cierres Z, IVA | MovimientosCaja, CajaActual, ControlParcialX, HistoricoCierresZ, SecuenciaTickets, Libros IVA, Asientos, EventosSIF |
+| `horario.web.js` | Fichajes laborales inmutables | RegistrosHorariosStaff, MmAuditLog |
+| `security.js` | RBAC, rate limiting | RateLimitBlocks |
+| `security.web.js` | WebMethods de acceso | — |
+| `securityEngine.js` | SHA256, HMAC, hash chain, JWT | — |
+| `staff.js` | Catálogo personal, búsqueda O(1) | — |
+| `bookingServiceSync.js` | Cola sync CMS ↔ Bookings | BookingsServiceSyncQueue |
+| `http-functions.js` | Webhooks HTTP | M365GraphSyncQueue |
+| `inventario.web.js` | Inventario y conciliación | InventarioStockVenta, MovimientosInventario, InventarioStockVentaCierre, AlertasOperativas |
+| `responseUtils.js` | AppError, successResponse, errorResponse | — |
+| `data.js` | Hooks inmutabilidad y validación | — |
+
+### Frontend (4 helpers)
+
+| Módulo | Misión |
+|---|---|
+| `mmUtils.js` | traceId, timezone, enmascarado PII, validación |
+| `widgetBridge.js` | Comunicación postMessage widgets |
+| `qrHelper.js` | QR Veri*factu + recibo fiscal |
+| `marianAdministrationController.js` | Controlador widget administración |
+
+### Módulos extra detectados (requieren resolución)
+
+| Módulo | Estado | Acción requerida |
+|---|---|---|
+| `contabilidad.js` | No inventariado | Justificar o refactorizar a `cajas.web.js` |
+| `crons.js` | No inventariado | Handlers deben estar en `jobs.config` o módulos canónicos |
+| `facturasRecibidas.web.js` | No inventariado | Justificar o refactorizar a `cajas.web.js` |
+| `fiscalAggregator.web.js` | No inventariado | Justificar o refactorizar |
+| `fiscalDocuments.web.js` | No inventariado | Justificar o refactorizar |
+| `m365GraphSync.js` | No inventariado | Refactorizar a `http-functions.js` |
+| `marianAssistant.web.js` | No inventariado | Justificar; verificar acceso a datos fiscales |
+
+---
+
+## 🟠 PRIORIDAD 6 — MOTOR DE RESERVAS (FLUJO CRÍTICO)
+
+### Arquitectura de 3 capas
+
+```
+reservas.web.js (Disponibilidad)
+       ↓
+bookingSaga.js (Orquestación Saga)
+       ↓
+bookingCore.js (Primitivas atómicas)
+```
+
+### Modelo de servicio dual con gap
+
+```
+F1 (Aplicación) → Gap/Exposición → F2 (Aclarado)
+phase1Duration      exposureDuration    phase2Duration
+██████████░░░░░░░░░░░░░░░░░░░░░░░████████████
+│← Ocupada →│← Libre →│← Ocup. →│
+```
+
+### Idempotencia (3 capas)
+
+1. `pairToken` determinista: `SHA256(serviceId + resourceId + f1Start + f2Start) + emailHash`
+2. `BookingTransactions`: `transactionId = SHA256(pairToken + payloadHash)[:16]`
+3. Query por `pairToken` en `CitasF2` antes de ejecutar Saga
+
+### Limitaciones pendientes (bloqueantes)
+
+| Limitación | Impacto |
+|---|---|
+| `_persistBooking` no escribe campos canónicos en CitasF2 | Balanceo parcial para citas nuevas |
+| `meta` serializado como `JSON.stringify` | Impide consultas por subcampos |
+| Rate limiter sin persistencia de violaciones | Abuso sobrevive cold starts |
+| Caché dual sin invalidación individual por pairToken | Pares expirados no se borran por evento |
+| `_resolveStaffForSlotInternal` es stub | Revalidación real no funciona |
+
+---
+
+## 🟠 PRIORIDAD 7 — CAJA, CONTABILIDAD Y CUMPLIMIENTO
+
+### Ruta canónica de toda operación económica
+
+```
+Evento Wix o acción autorizada
+    ↓
+Validación permisos + idempotencia
+    ↓
+Recálculo servidor (importes, impuestos, stock)
+    ↓
+Registro ledger fiscal (MovimientosCaja)
+    ↓
+Registro contable (AsientosContables + LineasAsientoContable)
+    ↓
+Registro auditoría (MmAuditLog + EventosSistemaFacturacion)
+    ↓
+Exportación documental al contable
+```
+
+### Cadena de integridad fiscal
+
+```
+canonicalPayload = JSON normalizado campos fiscales
+currentRecordHash = SHA256(canonicalPayload + previousRecordHash)
+digitalSignature = HMAC_SHA256(currentRecordHash, FISCAL_KEY)
+```
+
+### Roles y permisos
+
+| Acción | ADMIN | GESTION | ESTILISTA |
+|---|---|---|---|
+| Abrir caja | ✅ | ✅ | ❌ |
+| Cobro presencial | ✅ | ✅ | ❌ |
+| Cierre Z | ✅ | ❌ | ❌ |
+| Ajuste caja | ✅ | Limitado | ❌ |
+| Devolución | ✅ | Limitado | ❌ |
+| Cierre inventario | ✅ | ❌ | ❌ |
+| Fichaje propio | ✅ | ✅ | ✅ |
+
+---
+
+## 🟠 PRIORIDAD 8 — WEBHOOKS PENDIENTES
+
+| Webhook | Estado | Destino | Criticidad |
+|---|---|---|---|
+| `post_webhook_m365` | ✅ Implementado (HMAC) | M365GraphSyncQueue | — |
+| `post_webhook_payment` | ❌ **PENDIENTE** | MovimientosCaja, CitasF2 | **CRÍTICO** |
+| `post_webhook_order` | ❌ **PENDIENTE** | MovimientosCaja, MovimientosInventario, AsientosContables | **CRÍTICO** |
+
+---
+
+## 🟡 PRIORIDAD 9 — CONSTANTES GLOBALES CLAVE
+
+### Timeouts (ms)
+
+| Constante | Valor |
+|---|---|
+| `API_MS` | 15000 |
+| `BOOKING_CREATION_MS` | 25000 |
+| `DUAL_BOOKING_MS` | 40000 |
+| `CHECKOUT_MS` | 20000 |
+
+### Concurrencia
+
+| Constante | Valor |
+|---|---|
+| `MUTEX_TTL_MS` | 300000 (5 min) |
+| `HEARTBEAT_MS` | 15000 (15 s) |
+| `MAX_COMPENSATION_RETRIES` | 3 |
+| `LEDGER_MUTEX_TTL_MS` | 45000 |
+
+### Rate limiting
+
+| Constante | Valor |
+|---|---|
+| `MAX_REQUESTS` | 20 |
+| `WINDOW_MS` | 5000 |
+| `BOOKING_MAX_REQUESTS` | 5 |
+| `BOOKING_WINDOW_MS` | 10000 |
+
+### Cron jobs
+
+| Cron | Expresión | Misión |
+|---|---|---|
+| `cleanExpiredLocks` | `15 * * * *` | Purga locks expirados |
+| `cleanupExpiredDualCache` | `20 * * * *` | Elimina pares duales expirados |
+| `runPendingCompensationsJob` | `30 * * * *` | Procesa compensaciones pendientes |
+| `cleanExpiredDaysCache` | `0 1 * * *` | Purga AvailabilityDaysCache |
+| `cleanExpiredSlotsCache` | `10 1 * * *` | Purga caché RAM |
+| `systemHealthCheck` | `0 7 * * *` | Verifica BD, secretos, ledger |
+
+---
+
+## 🟡 PRIORIDAD 10 — SECRETS MANAGER (17 SECRETOS)
+
+> Todos desde Wix Secrets Manager. Nunca hardcodeados. Nunca expuestos a frontend.
+
+| Secreto | Uso |
+|---|---|
+| `FISCAL_KEY` | HMAC cadena fiscal |
+| `AUTH_JWT_KEY` | JWT autenticación |
+| `ADMIN_EMAILS` / `GESTION_EMAILS` | Roles |
+| `M365_*` (5 secretos) | Microsoft 365 Graph |
+| `SENDGRID_*` / `RESEND_*` | Email |
+| `MARIAN_ASSISTANT_OPENAI_KEY` | Asistente IA |
+| `POWER_AUTOMATE` | Automatización |
+
+---
+
+## 🟡 PRIORIDAD 11 — WIX APPS INSTALADAS
+
+| App | App ID | Uso |
+|---|---|---|
+| Wix Bookings | `13d21c63-b5ec-5912-8397-c3a5ddb27a97` | V2 exclusivo |
+| Wix Stores | `1380b703-ce81-ff05-f115-39571d94eab3` | Catalog V1 |
+| Wix Events | `140603ad-af8d-84fb-9004-ee174e35054d` | Auxiliares |
+| Wix Forms & Payments | `14ce1214-b278-a7e4-1373-00cebd1bef7c` | V2 |
+| Wix Invoices | `13ee94c1-b635-8505-3391-97919052c16f` | Delegado a cajas.web.js |
+| Wix Members Area | `14cc59bc-f0b7-15b8-e1c7-89ce41d0e0c9` | V2 |
+| Wix Gift Cards | `d80111c5-a0f4-47a8-b63a-65b54d774a27` | Requiere conciliación |
+
+---
+
+## 🟢 RESOLUCIÓN DE CONFLICTOS SSOT (QUÉ PREVALECE)
+
+| Conflicto | Resolución |
+|---|---|
+| Versiones fragmentadas (v5002.3 / v5002.4 / v5002.5) | **Unificar a v5002.6-CONSOLIDADA** |
+| Display fields técnicos vs visibles | **IDs visibles en español** (ESQUEMA v5002.5) |
+| SlotLocks display `lockKey` vs `slotClave` | **`slotClave`** (field key `slotKey`) |
+| Conteo hooks (13 / 11 / 18 / 16) | **Tabla única de 26 hooks** |
+| Orden despliegue (6 vs 8 niveles) | **8 niveles con SlotLocks en Nivel 2** |
+| `availableStaff` OBJECT vs MULTI_REF | **MULTI_REF** hacia MapaStaff |
+| `phase1ServiceId` vs `phaseOneServiceId` | **`phase1ServiceId`** (numérico) |
+| `reservaIdVinculada` dualidad | **Renombrar field key a `linkedBookingId`** |
+| Rol CAJERO vs GESTION | **Unificar a GESTION** |
+| `STATUS_PAGO_LEGACY` | **Eliminar; usar solo `paymentStatus`** |
+| Webhooks pago/pedido ausentes | **Implementar `post_webhook_payment` y `post_webhook_order`** |
+| 7 módulos extra-SSOT | **Justificar, documentar o refactorizar** |
+
+---
+
+## 📋 CHECKLIST DE DESPLIEGUE
+
+- [ ] 33 colecciones creadas en Wix Data con campos, tipos e índices correctos
+- [ ] 26 hooks de inmutabilidad activos en `data.js`
+- [ ] Display fields visibles configurados en dashboard
+- [ ] Índices compuestos declarados en panel Wix Data
+- [ ] `availableStaff` migrado a MULTI_REF
+- [ ] CategoriasServicio desplegada (Nivel 0)
+- [ ] Colecciones M6 completadas con campos del DOSSIER TÉCNICO
+- [ ] `post_webhook_payment` implementado con HMAC + idempotencia
+- [ ] `post_webhook_order` implementado con HMAC + idempotencia
+- [ ] 5 limitaciones del motor de reservas resueltas
+- [ ] 7 módulos extra-SSOT justificados o refactorizados
+- [ ] Cero `forbiddenLegacyIds` en código
+- [ ] Cero APIs deprecated
+- [ ] G10 ASCII en todo el código
+- [ ] Secrets en Wix Secrets Manager (no hardcodeados)
+- [ ] Local Editor y preview validados
+- [ ] Sandbox de pagos verificado

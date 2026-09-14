@@ -1,0 +1,656 @@
+# ESQUEMA MAESTRO DE COLECCIONES CMS PROPIAS
+## Ecosistema Marian Madrid · SSOT v5002.6-CONSOLIDADA · Wix Data CMS
+### Auditor: Velo Code Guardian · Estándar G10 ASCII · Wix Velo V2/V3
+
+> **Contexto**: Este documento define el esquema estructural, relacional y de seguridad de las **33 colecciones CMS personalizadas** (propias del negocio) que conforman el núcleo transaccional, fiscal y operativo de Marian Madrid. Sustituye cualquier esquema previo y se alinea estrictamente con el Decreto de Nomenclatura v5002.5 (Reglas R1-R7) y la arquitectura de módulos canónicos.
+
+---
+
+## 1. ORGANIZACIÓN POR OBJETIVOS DE NEGOCIO (MISIONES)
+
+Las 33 colecciones se agrupan en 7 objetivos estratégicos (Misiones) que dictan su ciclo de vida, nivel de despliegue y reglas de inmutabilidad.
+
+| Objetivo | Misión (M) | Colecciones incluidas | Nivel Despliegue |
+|---|---|---|---|
+| **OBJ-1: Catálogo y Recursos** | M1 / Aux | CATEGORIAS_SERVICIO, SERVICIOS_CATALOGO, COMPLEMENTOS_CATALOGO, MAPA_STAFF, PROVEEDORES_LISTA | 0, 1 |
+| **OBJ-2: Motor de Reservas** | M2, M3 | CITAS_F2, AVAILABILITY_DAYS_CACHE, DUAL_SLOT_CACHE, BOOKING_TRANSACTIONS, BOOKINGS_SERVICE_SYNC_QUEUE, COMPENSACIONES_PENDIENTES, M365_GRAPH_SYNC_QUEUE, SLOT_LOCKS | 2 |
+| **OBJ-3: Inventario Físico** | M4 | INVENTARIO_STOCK_VENTA, MOVIMIENTOS_INVENTARIO, INVENTARIO_STOCK_VENTA_CIERRE | 3 |
+| **OBJ-4: Caja y Ledger** | M5 | CAJA_ACTUAL, MOVIMIENTOS_CAJA, CONTROL_PARCIAL_X, HISTORICO_CIERRES_Z, SECUENCIA_TICKETS | 4 |
+| **OBJ-5: Contabilidad y Fiscal** | M6 | CONFIGURACION_FISCAL, LIBRO_IVA_FACTURAS_EXPEDIDAS, LIBRO_IVA_FACTURAS_RECIBIDAS, PLAN_CUENTAS_CONTABLES, ASIENTOS_CONTABLES, LINEAS_ASIENTO_CONTABLE, LIBRO_MAYOR_CONTABLE_SALDOS | 5 |
+| **OBJ-6: Auditoría, SIF y Laboral** | M7 | EVENTOS_SISTEMA_FACTURACION, MM_AUDIT_LOG, REGISTROS_HORARIOS_STAFF | 6 |
+| **OBJ-7: Infraestructura y Seguridad** | Infra | RATE_LIMIT_BLOCKS, ALERTAS_OPERATIVAS | 7 |
+
+---
+
+## 2. DETALLE DE ESQUEMA POR COLECCIÓN
+
+> **Leyenda de Índices**: `[U]` Único · `[S]` Simple · `[C]` Compuesto · `[F]` Full-Text · `—` Sin índice.
+> **Leyenda de Tipos**: `TEXT`, `NUMBER`, `BOOLEAN`, `DATETIME`, `OBJECT` (JSON nativo), `TAGS` (Array strings), `REFERENCE`, `MULTI_REF`.
+
+### OBJ-1: CATÁLOGO Y RECURSOS
+
+#### 1.1 CATEGORIAS_SERVICIO (Auxiliar)
+* **ID Interno**: `CategoriasServicio` | **Display**: `nombreCategoria`
+* **Permisos**: Lectura: Público/Motor | Escritura: Solo Admin | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| nombreCategoria | name | TEXT | [S] | Display field |
+
+#### 1.2 SERVICIOS_CATALOGO (M1)
+* **ID Interno**: `ServiciosCatalogo` | **Display**: `tituloServicio`
+* **Permisos**: Lectura: Público/Motor | Escritura: Solo Admin | Inmutabilidad: `beforeInsert/Update` (Valida esquema de duraciones)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| tituloServicio | title | TEXT | [S] | Display field |
+| slugUrl | slug | TEXT | [U] | URL amigable |
+| categoriaNombre | categoryName | REFERENCE | [S] | -> CATEGORIAS_SERVICIO |
+| categoriaId | categoryId | TEXT | [S] | ID Wix nativo |
+| servicioId | serviceId | TEXT | [U] | ID Wix Bookings V2 |
+| permitirCombinar | allowCombine | BOOLEAN | — | Habilita modo dual |
+| fasesEnlazadas | linkedPhases | TEXT | [S] | serviceId del F2 (R6) |
+| etiquetaServicio | tagLine | TEXT | — | R3 |
+| descripcionServicio | description | TEXT | [F] | R3 |
+| tarificacionModelo | pricingModel | TEXT | — | Enum validado |
+| precioServicio | price | NUMBER | — | R3 |
+| moneda | currency | TEXT | — | EUR |
+| depositoCantidad | depositAmount | NUMBER | — | R2 |
+| depositoTipo | depositType | TEXT | — | Enum validado |
+| principalMultimedia | mainMedia | OBJECT | — | Imagen Wix Media |
+| servicioTipo | serviceType | TEXT | — | Enum validado |
+| fase1Duracion | phase1Duration | NUMBER | — | Minutos F1 |
+| exposicionDuracion | exposureDuration | NUMBER | — | Minutos gap |
+| fase2Duracion | phase2Duration | NUMBER | — | Minutos F2 |
+| buffer | buffer | NUMBER | — | Minutos buffer |
+| localizacionId | locationId | TEXT | [S] | GUID Wix (TEXT, no REF) |
+| impuestoIncluido | taxIncluded | BOOLEAN | — | R2 |
+| impuestoTasa | taxRate | NUMBER | — | 0.21, 0.10, etc. |
+| onlinePago | onlinePayment | BOOLEAN | — | R2 |
+| presencialPago | inPersonPayment | BOOLEAN | — | R2 |
+| articuloSku | sku | TEXT | [S] | Vinculo a Stores V1 |
+| servicioOculto | hidden | BOOLEAN | — | R3 |
+| estadoServicio | status | TEXT | [S] | Enum: ACTIVO, INACTIVO |
+| disponibleStaff | availableStaff | MULTI_REF | — | -> MAPA_STAFF (0 a N) |
+| complementoOpciones | addOnOptions | MULTI_REF | — | -> COMPLEMENTOS_CATALOGO |
+| complementoTitulos | addOnTitles | MULTI_REF | — | LEGADO (no usar) |
+| internasNotas | internalNotes | TEXT | — | R3 |
+
+#### 1.3 COMPLEMENTOS_CATALOGO (M1)
+* **ID Interno**: `ComplementosCatalogo` | **Display**: `tituloComplemento`
+* **Permisos**: Lectura: Público/Motor | Escritura: Solo Admin | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| complementoId | addOnId | TEXT | [U] | ID Wix Bookings |
+| bookingsAddonId | bookingsAddonId | TEXT | [S] | R6 |
+| bookingsGroupAddonId | bookingsGroupAddonId | TEXT | [S] | R6 |
+| tituloComplemento | title | TEXT | [S] | Display field |
+| etiquetaComplemento | tagLine | TEXT | — | R3 |
+| descripcionComplemento | description | TEXT | [F] | R3 |
+| precioComplemento | price | NUMBER | — | R3 |
+| duracionComplemento | durationInMinutes | NUMBER | — | R2 |
+| principalMultimediaComplemento | mainMedia | OBJECT | — | Imagen Wix |
+| internoGrupo | internalGroup | TEXT | — | R3 |
+| categoriaComplemento | categoriaAddon | TEXT | [S] | Enum validado |
+| onlineDisponible | availableOnline | BOOLEAN | — | R2 |
+| maximaCantidad | maxQuantity | NUMBER | — | R2 |
+| activoComplemento | active | BOOLEAN | — | R3 |
+
+#### 1.4 MAPA_STAFF (M1)
+* **ID Interno**: `MapaStaff` | **Display**: `nombreStaff`
+* **Permisos**: Lectura: Motor/Admin | Escritura: Solo Admin | Inmutabilidad: `beforeInsert/Update` (Unicidad resourceId/staffMemberId)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| nombreStaff | displayName | TEXT | [S] | Display field (R4) |
+| recursoId | resourceId | TEXT | [U] | ID Wix Bookings (R6) |
+| correoStaff | email | TEXT | [S] | R3 |
+| staffMiembroId | staffMemberId | TEXT | [U] | ID Wix Members (R4) |
+| horarioId | scheduleId | TEXT | [S] | ID Wix Bookings (R6) |
+| localizacionId | locationId | TEXT | [S] | GUID Wix |
+| rolStaff | rol | TEXT | [S] | Enum: ADMIN, GESTION, ESTILISTA |
+| telefonoStaff | phone | TEXT | — | R3 |
+| activoStaff | active | BOOLEAN | — | R3 |
+| notasStaff | notes | TEXT | — | R3 |
+
+#### 1.5 PROVEEDORES_LISTA (M4 Aux)
+* **ID Interno**: `ProveedoresLista` | **Display**: `proveedorNombre`
+* **Permisos**: Lectura: Inventario | Escritura: Admin/Gestion | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| proveedorNombre | supplierName | TEXT | [S] | Display field |
+| comercialesTerminosOrigen | commercialTermsSource | TEXT | — | R2 |
+| minimoPedidoSinImpuesto | minimumOrderExTax | NUMBER | — | R2 |
+| gratisEnvioUmbralSinImpuesto | freeShippingThresholdExTax | NUMBER | — | R2 |
+| plazoEntregaTiempo | leadTime | NUMBER | — | R2 |
+| ventajasProveedor | advantages | TEXT | — | R3 |
+| notasProveedor | notes | TEXT | — | R3 |
+| activoProveedor | active | BOOLEAN | — | R3 |
+
+---
+
+### OBJ-2: MOTOR DE RESERVAS Y DISPONIBILIDAD
+
+#### 2.1 CITAS_F2 (M1 Transaccional)
+* **ID Interno**: `CitasF2` | **Display**: `reservaId`
+* **Permisos**: Lectura: Motor/Caja | Escritura: `bookingCore.js`, `bookingSaga.js` | Inmutabilidad: `beforeInsert/Update` (Valida campos y enums)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| reservaId | bookingId | TEXT | [U] | ID Wix Bookings V2 (R6) |
+| parToken | pairToken | TEXT | [S] | Idempotencia Saga |
+| uiParToken | uiPairToken | TEXT | — | R1 |
+| revisionCita | revision | NUMBER | — | R6 |
+| servicioId | serviceId | TEXT | [S] | ID Wix Bookings (R6) |
+| horarioId | scheduleId | TEXT | [S] | ID Wix Bookings (R6) |
+| recursoId | resourceId | TEXT | [S] | ID Staff (R6) |
+| inicioFecha | startDate | DATETIME | [S] | UTC |
+| finFecha | endDate | DATETIME | — | UTC |
+| inicioFechaLocal | startDateLocal | DATETIME | — | Europe/Madrid |
+| finFechaLocal | endDateLocal | DATETIME | — | Europe/Madrid |
+| fechaYmd | dateYmd | TEXT | [C] | YYYY-MM-DD (Compuesto con status+resourceId) |
+| reservaTipo | bookingType | TEXT | [S] | Enum: SIMPLE, DUAL_F1, DUAL_F2 |
+| estadoCita | status | TEXT | [C] | Enum: CONFIRMED, PENDING, CANCELED |
+| pagoEstado | paymentStatus | TEXT | [S] | Enum: PAID, UNPAID, REFUNDED |
+| metadatosCita | meta | OBJECT | — | JSON nativo (No serializar) |
+| contactoDetalles | contactDetails | OBJECT | — | JSON nativo |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 2.2 AVAILABILITY_DAYS_CACHE (M2)
+* **ID Interno**: `AvailabilityDaysCache` | **Display**: `idCache`
+* **Permisos**: Lectura/Escritura: `reservas.web.js` | Inmutabilidad: Ninguna (Caché)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idCache | _id | TEXT | [U] | Wix Data nativo |
+| servicioId | serviceId | TEXT | [C] | Compuesto con expiresAt |
+| diasDisponibles | availableDays | TAGS | — | Array de YYYY-MM-DD |
+| expiraFecha | expiresAt | DATETIME | [C] | TTL |
+
+#### 2.3 DUAL_SLOT_CACHE (M2)
+* **ID Interno**: `DualSlotCache` | **Display**: `parToken`
+* **Permisos**: Lectura/Escritura: `reservas.web.js`, `bookingSaga.js` | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idParToken | _id | TEXT | [U] | Wix Data nativo |
+| parToken | pairToken | TEXT | [S] | R1 |
+| servicioId | serviceId | TEXT | [C] | Compuesto con dateYmd |
+| fase1ServicioId | phase1ServiceId | TEXT | — | R6 (Numérico) |
+| fase2ServicioId | phase2ServiceId | TEXT | — | R6 (Numérico) |
+| slotF1 | slotF1 | OBJECT | — | JSON nativo Wix Slot |
+| slotF2 | slotF2 | OBJECT | — | JSON nativo Wix Slot |
+| recursoId | resourceId | TEXT | [S] | R6 |
+| candidatoRecursoIds | candidateResourceIds | TAGS | — | Array de resourceIds |
+| fechaYmd | dateYmd | TEXT | [C] | YYYY-MM-DD |
+| expiraFecha | expiresAt | DATETIME | [S] | TTL 15 min |
+| estadoCache | status | TEXT | [S] | Enum: ACTIVE, EXPIRED |
+
+#### 2.4 BOOKING_TRANSACTIONS (M3)
+* **ID Interno**: `BookingTransactions` | **Display**: `parToken`
+* **Permisos**: Lectura/Escritura: `bookingCore.js` | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idTransaccion | _id | TEXT | [U] | Wix Data nativo |
+| transaccionId | transactionId | TEXT | [U] | SHA256 hash |
+| parToken | pairToken | TEXT | [S] | R1 |
+| estadoTransaccion | status | TEXT | [S] | Enum: INITIATED, COMPLETED, FAILED |
+| cargaHash | payloadHash | TEXT | — | R2 |
+| resultadoTransaccion | result | OBJECT | — | JSON nativo |
+| errorTransaccion | error | TEXT | — | R3 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 2.5 BOOKINGS_SERVICE_SYNC_QUEUE (M3)
+* **ID Interno**: `BookingsServiceSyncQueue` | **Display**: `idCola`
+* **Permisos**: Lectura/Escritura: `bookingServiceSync.js` | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idCola | _id | TEXT | [U] | Wix Data nativo |
+| servicioId | serviceId | TEXT | [S] | R6 |
+| cargaDeseada | desiredPayload | OBJECT | — | JSON nativo |
+| cargaHash | payloadHash | TEXT | — | R2 |
+| estadoCola | status | TEXT | [S] | Enum: PENDING, COMPLETED, FAILED |
+| intentosCola | attempts | NUMBER | — | R2 |
+| proximoIntentoFecha | nextAttemptAt | DATETIME | [S] | Backoff |
+| completadoFecha | completedAt | DATETIME | — | R2 |
+| fallidoFecha | failedAt | DATETIME | — | R2 |
+| codigoError | errorCode | TEXT | — | R3 |
+
+#### 2.6 COMPENSACIONES_PENDIENTES (M3)
+* **ID Interno**: `CompensacionesPendientes` | **Display**: `reservaId`
+* **Permisos**: Lectura/Escritura: `bookingSaga.js`, Cron | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idCompensacion | _id | TEXT | [U] | Wix Data nativo |
+| claseCompensacion | kind | TEXT | [S] | Enum: CANCEL_BOOKING, REFUND |
+| reservaId | bookingId | TEXT | [S] | R6 |
+| faseCompensacion | phase | TEXT | — | F1 o F2 |
+| estadoCompensacion | status | TEXT | [S] | Enum: PENDING, FAILED |
+| intentosCompensacion | attempts | NUMBER | — | Max 3 |
+| cantidadCompensacion | amount | NUMBER | — | R2 |
+| pagoMetodo | paymentMethod | TEXT | — | R2 |
+| transaccionId | transactionId | TEXT | — | R6 |
+| pedidoId | orderId | TEXT | — | R6 |
+| devolucionId | refundId | TEXT | — | R6 |
+| conceptoCompensacion | concept | TEXT | — | R3 |
+| movimientoTipo | movementType | TEXT | — | R2 |
+| alertaRequerida | alertRequired | BOOLEAN | — | R2 |
+| ultimoError | lastError | TEXT | — | R3 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 2.7 M365_GRAPH_SYNC_QUEUE (M3)
+* **ID Interno**: `M365GraphSyncQueue` | **Display**: `registroExternoId`
+* **Permisos**: Lectura/Escritura: `http-functions.js`, Cron | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idCola | _id | TEXT | [U] | Wix Data nativo |
+| registroExternoId | externalRecordId | TEXT | [S] | R2 |
+| cargaDeseada | desiredPayload | OBJECT | — | JSON nativo |
+| estadoCola | status | TEXT | [S] | PENDING, COMPLETED, FAILED |
+| intentosCola | attempts | NUMBER | — | Max 3 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 2.8 SLOT_LOCKS (Infra Transaccional)
+* **ID Interno**: `SlotLocks` | **Display**: `slotClave`
+* **Permisos**: Lectura/Escritura: `bookingCore.js` | Inmutabilidad: Ninguna (TTL based)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idLock | _id | TEXT | [U] | Wix Data nativo |
+| slotClave | slotKey | TEXT | [U] | Formato: lock:srv:res:start (R4) |
+| lockPropietarioId | traceId | TEXT | — | Owner ID (R4) |
+| expiraFecha | expiresAt | DATETIME | [S] | TTL 300s |
+
+---
+
+### OBJ-3: INVENTARIO FÍSICO
+
+#### 3.1 INVENTARIO_STOCK_VENTA (M4)
+* **ID Interno**: `InventarioStockVenta` | **Display**: `productoNombre`
+* **Permisos**: Lectura: Inventario/Caja | Escritura: `inventario.web.js` | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| articuloSku | sku | TEXT | [U] | Vinculo Stores V1 |
+| productoNombre | productName | TEXT | [S] | Display field |
+| descripcionProducto | description | TEXT | — | R3 |
+| categoriaProducto | category | TEXT | [S] | R3 |
+| ventaPrecioImpuestoIncluido | salePriceTaxIncluded | NUMBER | — | R2 |
+| costoSinImpuesto | costExTax | NUMBER | — | R2 |
+| proveedorProducto | supplier | REFERENCE | [S] | -> PROVEEDORES_LISTA |
+| stockEsperado | stockExpected | NUMBER | — | R2 |
+| bajoStockAlerta | lowStockAlert | NUMBER | — | R2 |
+| reordenPunto | reorderPoint | NUMBER | — | R2 |
+| localizacionProducto | location | TEXT | — | R3 |
+| wixProductoId | wixProductId | TEXT | [S] | R6 |
+| wixVarianteId | wixVariantId | TEXT | [S] | R6 |
+| necesitaWixConciliacion | needsWixReconciliation | BOOLEAN | — | R2 |
+| activoProducto | active | BOOLEAN | — | R3 |
+| ultimoInventarioMovimientoFecha | lastInventoryMovementAt | DATETIME | — | R2 |
+| ultimoInventarioMovimientoId | lastInventoryMovementId | TEXT | — | R2 |
+
+#### 3.2 MOVIMIENTOS_INVENTARIO (M4)
+* **ID Interno**: `MovimientosInventario` | **Display**: `movimientoToken`
+* **Permisos**: Lectura: Inventario | Escritura: `inventario.web.js` | Inmutabilidad: `beforeUpdate/Remove` (Prohibido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idMovimiento | _id | TEXT | [U] | Wix Data nativo |
+| movimientoToken | movementToken | TEXT | [U] | Idempotencia |
+| articuloSku | sku | TEXT | [C] | Compuesto con movementType |
+| productoNombre | productName | TEXT | — | R3 |
+| cantidadMovimiento | quantity | NUMBER | — | R2 |
+| cantidadDelta | quantityDelta | NUMBER | — | R2 |
+| stockPrevio | stockBefore | NUMBER | — | R2 |
+| stockPosterior | stockAfter | NUMBER | — | R2 |
+| movimientoTipo | movementType | TEXT | [C] | Enum: IN, OUT, ADJUST |
+| motivoMovimiento | reason | TEXT | — | R3 |
+| referenciaId | referenceId | TEXT | — | R2 |
+| pedidoId | orderId | TEXT | — | R6 |
+| devolucionId | refundId | TEXT | — | R6 |
+| actorCorreo | actorEmail | TEXT | — | R3 |
+| actorMiembroId | actorMemberId | TEXT | — | R4 |
+| requiereWixConciliacion | requiresWixReconciliation | BOOLEAN | — | R2 |
+| nativoComercialMovimiento | nativeCommercialMovement | BOOLEAN | — | R2 |
+| wixProductoId | wixProductId | TEXT | — | R6 |
+| wixVarianteId | wixVariantId | TEXT | — | R6 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 3.3 INVENTARIO_STOCK_VENTA_CIERRE (M4)
+* **ID Interno**: `InventarioStockVentaCierre` | **Display**: `inventarioCierreId`
+* **Permisos**: Lectura: Admin | Escritura: `inventario.web.js` | Inmutabilidad: `beforeUpdate/Remove` (Bloquea cierre firmado)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| inventarioCierreId | _id | TEXT | [U] | Wix Data nativo |
+| fiscalEjercicio | fiscalYear | TEXT | [S] | R2 |
+| cierreFecha | closingDate | DATETIME | [S] | R2 |
+| cierreTipo | closingType | TEXT | — | Enum validado |
+| articuloSku | sku | TEXT | [C] | Compuesto con closingDate |
+| productoId | productId | TEXT | — | R2 |
+| productoDescripcion | productDescription | TEXT | — | R3 |
+| existenciasCantidad | stockQuantity | NUMBER | — | R2 |
+| unitarioCosto | unitCost | NUMBER | — | R2 |
+| existenciasValor | stockValue | NUMBER | — | R2 |
+| cuentaCodigo | accountCode | TEXT | — | R2 |
+| debeSaldo | debitBalance | NUMBER | — | R2 |
+| haberSaldo | creditBalance | NUMBER | — | R2 |
+| cierreHash | closingHash | TEXT | — | SHA256 |
+| cierreFirma | closingSignature | TEXT | — | HMAC |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+---
+
+### OBJ-4: CAJA FÍSICA Y LEDGER
+
+#### 4.1 CAJA_ACTUAL (M5)
+* **ID Interno**: `CajaActual` | **Display**: `operacionFecha`
+* **Permisos**: Lectura: Caja/Admin | Escritura: `cajas.web.js` | Inmutabilidad: `beforeInsert/Update/Remove` (Singleton protegido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| operacionFecha | operationDate | TEXT | [S] | YYYY-MM-DD |
+| cajaRegistroEstado | cashRegisterStatus | TEXT | — | Enum: ABIERTA, CERRADA |
+| totalSaldo | totalBalance | NUMBER | — | R2 |
+| efectivoSaldo | cashBalance | NUMBER | — | R2 |
+| tarjetaSaldo | cardBalance | NUMBER | — | R2 |
+| bizumSaldo | bizumBalance | NUMBER | — | R2 |
+| onlineSaldo | onlineBalance | NUMBER | — | R2 |
+| totalOperaciones | totalOperations | NUMBER | — | R2 |
+| aperturaFecha | openedAt | DATETIME | — | R2 |
+| cierreFecha | closedAt | DATETIME | — | R2 |
+| ultimaActividadFecha | lastActivityAt | DATETIME | — | R2 |
+
+#### 4.2 MOVIMIENTOS_CAJA (M5) - **NÚCLEO FISCAL**
+* **ID Interno**: `MovimientosCaja` | **Display**: `facturaNumero`
+* **Permisos**: Lectura: Caja/Contable | Escritura: `cajas.web.js` | Inmutabilidad: `beforeInsert` (Valida Hash Chain), `beforeUpdate/Remove` (Prohibido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idRegistro | _id | TEXT | [U] | Wix Data nativo |
+| secuenciaNumero | sequenceNumber | NUMBER | [U] | Secuencia sin huecos |
+| facturaNumero | invoiceNumber | TEXT | [U] | Display field |
+| operacionFecha | operationDate | TEXT | [C] | YYYY-MM-DD |
+| fiscalPeriodo | fiscalPeriod | TEXT | [C] | YYYY-MM |
+| movimientoTipo | movementType | TEXT | [C] | Enum: VENTA, GASTO, AJUSTE |
+| operacionNaturaleza | operationNature | TEXT | — | Enum validado |
+| pagoMetodo | paymentMethod | TEXT | [C] | Enum: EFECTIVO, TARJETA... |
+| totalCantidad | totalAmount | NUMBER | — | R2 |
+| gravableCantidad | taxableAmount | NUMBER | — | R2 |
+| impuestoCantidad | taxAmount | NUMBER | — | R2 |
+| impuestoTasa | taxRate | NUMBER | — | 0.21, 0.10... |
+| impuestoTratamiento | taxTreatment | TEXT | — | Enum validado |
+| contableSigno | accountingSign | NUMBER | — | 1 o -1 |
+| contableCantidad | accountingAmount | NUMBER | — | R2 |
+| descripcionMovimiento | description | TEXT | — | R3 |
+| lineaArticulos | lineItems | OBJECT | — | JSON nativo (Array) |
+| rectificadaFacturaReferencia | rectifiedInvoiceReference | TEXT | — | R2 |
+| previoRegistroHash | previousRecordHash | TEXT | — | SHA256 cadena |
+| actualRegistroHash | currentRecordHash | TEXT | — | SHA256 cadena |
+| digitalFirma | digitalSignature | TEXT | — | HMAC FISCAL_KEY |
+| negocioTributariaId | businessTaxId | TEXT | — | NIF |
+| esquemaIntegridadVersion | schemaIntegrityVersion | TEXT | — | v5002.6 |
+| registroOrigen | recordSource | TEXT | — | POS, BOOKING, MANUAL |
+| reservaIdVinculada | linkedBookingId | TEXT | [S] | -> CITAS_F2.bookingId (R6) |
+| transaccionId | transactionId | TEXT | [S] | -> Wix Payments |
+| recursoId | resourceId | TEXT | [S] | -> MAPA_STAFF |
+| registradoFecha | registeredAt | DATETIME | — | R2 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 4.3 CONTROL_PARCIAL_X (M5)
+* **ID Interno**: `ControlParcialX` | **Display**: `operacionFecha`
+* **Permisos**: Lectura: Caja | Escritura: `cajas.web.js` | Inmutabilidad: Ninguna (Operativo)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| operacionFecha | operationDate | TEXT | [C] | YYYY-MM-DD |
+| contadoEfectivo | countedCash | NUMBER | — | R2 |
+| esperadoEfectivo | expectedCash | NUMBER | — | R2 |
+| descuadreCantidad | discrepancyAmount | NUMBER | — | R2 |
+| cuadreEstado | reconciliationStatus | TEXT | — | Enum validado |
+| contadoFecha | countedAt | DATETIME | — | R2 |
+| arqueadoFecha | reconciledAt | DATETIME | — | R2 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 4.4 HISTORICO_CIERRES_Z (M5)
+* **ID Interno**: `HistoricoCierresZ` | **Display**: `operacionFecha`
+* **Permisos**: Lectura: Admin/Contable | Escritura: `cajas.web.js` | Inmutabilidad: `beforeUpdate/Remove` (Prohibido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idCierreZ | _id | TEXT | [U] | Wix Data nativo |
+| operacionFecha | operationDate | TEXT | [U] | YYYY-MM-DD (Único) |
+| cierreEstado | closingStatus | TEXT | — | CERRADO, VERIFICADO |
+| consolidadoTotalCantidad | consolidatedTotalAmount | NUMBER | — | R2 |
+| brutasVentasTotal | grossSalesTotal | NUMBER | — | R2 |
+| netaGravableCantidad | netTaxableAmount | NUMBER | — | R2 |
+| netaImpuestoCantidad | netTaxAmount | NUMBER | — | R2 |
+| totalEfectivo | totalCash | NUMBER | — | R2 |
+| totalTarjeta | totalCard | NUMBER | — | R2 |
+| totalBizum | totalBizum | NUMBER | — | R2 |
+| totalOnline | totalOnline | NUMBER | — | R2 |
+| totalDevoluciones | totalRefunds | NUMBER | — | R2 |
+| totalPropinas | totalTips | NUMBER | — | R2 |
+| totalAjustes | totalAdjustments | NUMBER | — | R2 |
+| totalOperaciones | totalOperations | NUMBER | — | R2 |
+| inicioSecuencia | startSequence | NUMBER | — | R2 |
+| finSecuencia | endSequence | NUMBER | — | R2 |
+| inicioTicketNumero | startTicketNumber | TEXT | — | R2 |
+| finTicketNumero | endTicketNumber | TEXT | — | R2 |
+| inicioRegistroHash | startRecordHash | TEXT | — | SHA256 |
+| finRegistroHash | endRecordHash | TEXT | — | SHA256 |
+| movimientoTipoDesglose | movementTypeBreakdown | OBJECT | — | JSON nativo |
+| impuestoTipoDesglose | taxTypeBreakdown | OBJECT | — | JSON nativo |
+| esIntegridadVerificada | isIntegrityVerified | BOOLEAN | — | R2 |
+| auditadosRegistrosCantidad | auditedRecordsCount | NUMBER | — | R2 |
+| cierreHash | closingHash | TEXT | — | SHA256 |
+| cierreFirma | closingSignature | TEXT | — | HMAC |
+| cierreOrigen | closingSource | TEXT | — | Enum validado |
+| cierreEsquemaVersion | closingSchemaVersion | TEXT | — | R2 |
+| horariaZona | timeZone | TEXT | — | Europe/Madrid |
+| cerradoFecha | closedAt | DATETIME | — | R2 |
+| verificadoFecha | verifiedAt | DATETIME | — | R2 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 4.5 SECUENCIA_TICKETS (M5)
+* **ID Interno**: `SecuenciaTickets` | **Display**: `idElemento`
+* **Permisos**: Lectura/Escritura: `cajas.web.js` | Inmutabilidad: `beforeUpdate` (No salto regresivo)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Singleton |
+| secuenciaContadores | sequenceCounters | OBJECT | — | JSON nativo |
+
+---
+
+### OBJ-5: CONTABILIDAD Y FISCALIDAD (M6)
+
+#### 5.1 CONFIGURACION_FISCAL (M6)
+* **ID Interno**: `ConfiguracionFiscal` | **Display**: `negocioNombre`
+* **Permisos**: Lectura: Caja/Sistema | Escritura: Solo Admin | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Singleton |
+| negocioNombre | businessName | TEXT | — | R3 |
+| *(Campos adicionales de NIF, dirección, régimen fiscal según DOSSIER TÉCNICO)* | | | | |
+
+#### 5.2 LIBRO_IVA_FACTURAS_EXPEDIDAS, LIBRO_IVA_FACTURAS_RECIBIDAS, PLAN_CUENTAS_CONTABLES y LIBRO_MAYOR_CONTABLE_SALDOS (M6)
+* **Colecciones**: `LibroIVAFacturasExpedidas`, `LibroIVAFacturasRecibidas`, `PlanCuentasContables`, `LibroMayorContableSaldos`
+* **Permisos**: Lectura: Contable/Admin | Escritura: `cajas.web.js` | Inmutabilidad: `beforeUpdate/Remove` (Prohibido una vez emitido)
+* **Estructura**: Definida exhaustivamente en ESQUEMA CMS §4.21 a §4.26. Siguen estrictamente los campos del DOSSIER CAJA (invoiceNumber, receptionNumber, accountCode, accountName, etc.).
+
+#### 5.3 ASIENTOS_CONTABLES y LINEAS_ASIENTO_CONTABLE (M6)
+* **Colecciones**: `AsientosContables`, `LineasAsientoContable`
+* **Permisos**: Lectura: Contable | Escritura: `cajas.web.js` | Inmutabilidad: `beforeUpdate/Remove` (Bloquea si `entryStatus` es POSTED/LOCKED)
+
+| Campo Clave (Asientos) | ID Interno | Tipo | Nota |
+|---|---|---|---|
+| asientoNumero | entryNumber | TEXT | Display field |
+| asientoEstado | entryStatus | TEXT | Enum: DRAFT, POSTED, LOCKED |
+| totalDebe | totalDebit | NUMBER | Debe cuadrar con Haber |
+| totalHaber | totalCredit | NUMBER | Debe cuadrar con Debe |
+| asientoHash | entryHash | TEXT | SHA256 |
+| asientoFirma | entrySignature | TEXT | HMAC |
+
+---
+
+### OBJ-6: AUDITORÍA, SIF Y LABORAL (M7)
+
+#### 6.1 EVENTOS_SISTEMA_FACTURACION (M7) - **SIF Veri*factu**
+* **ID Interno**: `EventosSistemaFacturacion` | **Display**: `sistemaEventoId`
+* **Permisos**: Lectura: Admin/Auditor | Escritura: `cajas.web.js` | Inmutabilidad: `beforeUpdate/Remove` (Prohibido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| sistemaEventoId | systemEventId | TEXT | [U] | Display field |
+| eventoFechaHora | eventDateTime | DATETIME | [C] | Compuesto con eventType |
+| eventoTipo | eventType | TEXT | [C] | Enum: INVOICE_ISSUED... |
+| severidadEvento | severity | TEXT | — | INFO, WARNING, ERROR |
+| resultadoEvento | result | TEXT | — | SUCCESS, FAILURE |
+| eventoOrigen | eventSource | TEXT | — | Caja, Facturación |
+| responsableUsuarioId | responsibleUserId | TEXT | — | R2 |
+| responsableMiembroId | responsibleMemberId | TEXT | — | R4 |
+| diarioAsientoId | journalEntryId | TEXT | — | -> ASIENTOS_CONTABLES |
+| transaccionId | transactionId | TEXT | — | R6 |
+| referenciaId | referenceId | TEXT | — | R2 |
+| seguroDetalle | secureDetail | OBJECT | — | JSON nativo |
+| previoEventoHash | previousEventHash | TEXT | — | SHA256 cadena |
+| eventoHash | eventHash | TEXT | — | SHA256 |
+| eventoFirma | eventSignature | TEXT | — | HMAC |
+| sistemaVersion | systemVersion | TEXT | — | R2 |
+| esquemaVersion | schemaVersion | TEXT | — | R2 |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+#### 6.2 MM_AUDIT_LOG (M7)
+* **ID Interno**: `MmAuditLog` | **Display**: `eventoTipo`
+* **Permisos**: Lectura: Admin | Escritura: Todos los módulos | Inmutabilidad: `beforeUpdate/Remove` (Prohibido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| eventoTipo | eventType | TEXT | [S] | Display field |
+| nivelAuditoria | level | TEXT | [S] | Enum: INFO, WARNING, ERROR |
+| mensajeAuditoria | message | TEXT | [F] | R3 |
+| origenAuditoria | source | TEXT | [S] | Módulo que emite |
+| recursoId | resourceId | TEXT | [S] | R6 |
+| trazaId | traceId | TEXT | [S] | R1 |
+| registradoFecha | loggedAt | DATETIME | [S] | R2 |
+| datosAuditoria | data | OBJECT | — | JSON nativo (PII enmascarada) |
+
+#### 6.3 REGISTROS_HORARIOS_STAFF (M7) - **Art. 34.9 ET**
+* **ID Interno**: `RegistrosHorariosStaff` | **Display**: `registradoFecha`
+* **Permisos**: Lectura: Admin/Staff (propio) | Escritura: `horario.web.js` | Inmutabilidad: `beforeInsert` (Valida secuencia), `beforeUpdate/Remove` (Prohibido)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| recursoId | resourceId | TEXT | [C] | -> MAPA_STAFF |
+| nombreStaff | displayName | TEXT | — | R4 |
+| staffMiembroId | staffMemberId | TEXT | — | R4 |
+| registradoFecha | recordedAt | DATETIME | [S] | Display field |
+| registradaHora | recordedTime | TEXT | — | HH:mm:ss |
+| diaClave | dayKey | TEXT | [C] | YYYY-MM-DD (Europe/Madrid) |
+| mesClave | monthKey | TEXT | [C] | YYYY-MM |
+| fichajeEventoTipo | clockEventType | TEXT | [C] | Enum: ENTRADA, SALIDA... |
+| tipoTurno | type | TEXT | — | R3 |
+| empleadaIdentificador | employeeIdentifier | TEXT | — | NIF/NIE (Minimizado) |
+| empleadaNombre | employeeName | TEXT | — | R3 |
+| registradoPor | registeredBy | TEXT | — | SELF o ADMIN |
+| registradoPorMiembroId | registeredByMemberId | TEXT | — | R4 |
+| nombreRegistrador | recordingName | TEXT | — | R3 |
+| ajusteMotivo | adjustmentReason | TEXT | — | Obligatorio si AJUSTE |
+| dispositivoIp | deviceIp | TEXT | — | R3 |
+| dispositivoIpDireccion | deviceIpAddress | TEXT | — | R3 |
+| firmaHorario | signature | TEXT | — | HMAC |
+| metaHorario | meta | OBJECT | — | JSON nativo |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+---
+
+### OBJ-7: INFRAESTRUCTURA Y SEGURIDAD
+
+#### 7.1 RATE_LIMIT_BLOCKS (Infra)
+* **ID Interno**: `RateLimitBlocks` | **Display**: `idElemento`
+* **Permisos**: Lectura/Escritura: `security.js` | Inmutabilidad: Ninguna (TTL based)
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| superficieBloqueo | surface | TEXT | [C] | Compuesto con key |
+| claveBloqueo | key | TEXT | [C] | IP, userId, email |
+| expiraFecha | expiresAt | DATETIME | [S] | TTL bloqueo |
+
+#### 7.2 ALERTAS_OPERATIVAS (Infra)
+* **ID Interno**: `AlertasOperativas` | **Display**: `idElemento`
+* **Permisos**: Lectura: Admin | Escritura: Sistema | Inmutabilidad: Ninguna
+
+| Campo Visible | ID Interno | Tipo | Índice | Relación / Nota |
+|---|---|---|---|---|
+| idElemento | _id | TEXT | [U] | Wix Data nativo |
+| alertaTipo | alertType | TEXT | [S] | Enum: CASH_DISCREPANCY... |
+| severidadAlerta | severity | TEXT | [S] | INFO, WARNING, ERROR |
+| mensajeAlerta | message | TEXT | [F] | R3 |
+| estadoAlerta | status | TEXT | [S] | OPEN, RESOLVED |
+| trazaId | traceId | TEXT | [S] | R1 |
+
+---
+
+## 3. MAPA DE VÍNCULOS Y RELACIONES (FOREIGN KEYS)
+
+### 3.1 Relaciones Nativas Wix Data (REFERENCE / MULTI_REF)
+
+| Origen | Campo | Tipo | Destino | Cardinalidad |
+|---|---|---|---|---|
+| SERVICIOS_CATALOGO | categoryName | REFERENCE | CATEGORIAS_SERVICIO | 1:1 |
+| SERVICIOS_CATALOGO | availableStaff | MULTI_REF | MAPA_STAFF | 0:N |
+| SERVICIOS_CATALOGO | addOnOptions | MULTI_REF | COMPLEMENTOS_CATALOGO | 0:N |
+| INVENTARIO_STOCK_VENTA | supplier | REFERENCE | PROVEEDORES_LISTA | 1:1 |
+
+### 3.2 Relaciones Lógicas (Foreign Keys por TEXT)
+
+| Origen | Campo | Destino Lógico | Nota |
+|---|---|---|---|
+| CITAS_F2 | serviceId | SERVICIOS_CATALOGO.servicioId | R6 (Alineación Wix V2) |
+| CITAS_F2 | resourceId | MAPA_STAFF.recursoId | R6 |
+| MOVIMIENTOS_CAJA | linkedBookingId | CITAS_F2.bookingId | Renombrado de reservaIdVinculada |
+| MOVIMIENTOS_CAJA | resourceId | MAPA_STAFF.recursoId | Profesional que cobró |
+| MOVIMIENTOS_INVENTARIO | sku | INVENTARIO_STOCK_VENTA.articuloSku | Vinculo físico |
+| ASIENTOS_CONTABLES | journalEntryId | LINEAS_ASIENTO_CONTABLE.diarioAsientoId | 1:N Partida doble |
+| EVENTOS_SISTEMA_FACTURACION | journalEntryId | ASIENTOS_CONTABLES._id | Vinculo SIF-Contable |
+| REGISTROS_HORARIOS_STAFF | resourceId | MAPA_STAFF.recursoId | Vinculo Laboral |
+
+---
+
+## 4. MATRIZ DE PERMISOS E INMUTABILIDAD RESUMIDA
+
+| Colección | Lectura | Escritura | Hooks de Inmutabilidad (data.js) |
+|---|---|---|---|
+| **Catálogo (M1)** | Público / Motor | Solo Admin | Validación de esquema y unicidad |
+| **Motor Reservas (M2/M3)** | Motor / Caja | `bookingCore`, `bookingSaga` | Validación de enums y campos canónicos |
+| **Inventario (M4)** | Inventario / Caja | `inventario.web` | Prohibido update/remove en movimientos |
+| **Caja y Ledger (M5)** | Caja / Contable | `cajas.web` | **CRÍTICO**: Hash chain en insert, prohibido update/remove |
+| **Contabilidad (M6)** | Contable / Admin | `cajas.web` | Bloqueo si estado es POSTED/LOCKED |
+| **Auditoría/Laboral (M7)** | Admin / Staff | Módulos autorizados | **CRÍTICO**: Prohibido update/remove (SIF y Art 34.9 ET) |
+| **Infraestructura** | Sistema | `security`, Sistema | Ninguna (basado en TTL) |
+
+---
+
+*Fin del Esquema Maestro de Colecciones CMS Propias.*
+*Este documento es la referencia estructural definitiva para consultas, desarrollo de webMethods, configuración de dashboards en Wix Data y auditorías de cumplimiento.*

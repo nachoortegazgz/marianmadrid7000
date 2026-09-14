@@ -1,0 +1,757 @@
+# INVENTARIO MAESTRO DEL ECOSISTEMA MARIAN MADRID
+## Estructura canónica por capas: Sitio, Apps, Módulos, Colecciones, Constantes
+### Versión: v5002.6-CONSOLIDADA · Alineado con SSOT v5002.5 · G10 ASCII · Wix Velo V2/V3
+
+> **Propósito**: Inventario único de todos los elementos del ecosistema, organizados por capa funcional. Cada elemento incluye su nombre canónico, definición breve y misión. Referencia cruzada con `BIBLIA DEFINITIVA v5002.5`, `ESQUEMA CMS v5002.5`, `SSOT.json v5002.5-corregida`, `DOSSIER MOTOR RESERVAS v0609`, `DOSSIER CAJA v5002.4` y `DIRECTRICES V19`.
+
+---
+
+## BLOQUE A — IDENTIDAD DEL SITIO WIX
+
+| Elemento | Valor | Misión |
+|---|---|---|
+| Nombre comercial | Marian Madrid Peluquería y Estética | Identidad del negocio |
+| Site ID | `188bed94-177c-4bc9-a9f0-35080d874f3e` | Identificador único del sitio Wix |
+| Location ID | `7a12abfd-bf30-4847-bcdf-00dc573d4802` | Ubicación física activa en Wix |
+| Dirección | C/ Maurice Ravel 35, Local, 50012 Zaragoza | Ubicación física real |
+| Huso horario | `Europe/Madrid` | Zona horaria operativa |
+| Moneda | `EUR` | Divisa de operación |
+| País | `ES` | Código de país |
+| Idioma | `es` | Idioma del sitio |
+| Dominio | marianmadrid.es | Dominio público |
+| Runtime | Wix Velo V2/V3 · Backend serverless | Entorno de ejecución |
+| Estándar de código | G10 ASCII Strict · ES Modules | Regla de codificación |
+| Motor de reservas | Wix Bookings V2 (exclusivo) | API nativa de reservas |
+| Modelo de recurso | Un recurso por slot · NO multiservice | 3 profesionales, recurso único |
+| Marco normativo | SIF/Veri*factu · IVA · PGC · Art 34.9 ET · RGPD/LOPDGDD | Cumplimiento legal |
+
+### A.1 Personal activo (fuente: `MapaStaff`)
+
+| Profesional | Email | resourceId | scheduleId | Rol |
+|---|---|---|---|---|
+| MARIAN MADRID | `marian@marianmadrid.es` | `e556070a-6d6a-402e-8422-11133033ea76` | `06af20d4-1ec3-49fa-9075-f0691dfa7fd4` | PROPIETARIA / ADMIN |
+| ANDREA STAFF | `andrea@marianmadrid.es` | `07f7344f-e7e4-4c53-854b-47fd82ac8d40` | `a494b829-8161-4b84-b78d-6ffed45b4abe` | ESTILISTA |
+| ALBA STAFF | `alba@marianmadrid.es` | `9b905bfd-1a09-485d-9273-a24a20dfe648` | `94b8980d-63f4-43b1-ba86-41075e0eb63c` | ESTILISTA |
+
+### A.2 Recursos Wix globales
+
+| Constante | Valor | Misión |
+|---|---|---|
+| `STAFF_RESOURCE_TYPE_ID` | `1cd44cf8-756f-41c3-bd90-3e2ffcaf1155` | Filtra recursos de tipo personal en APIs de disponibilidad |
+| `MARIAN_MANAGEMENT_RESOURCE_ID` | `e556070a-6d6a-402e-8422-11133033ea76` | Recurso de gestión de Marian |
+| `STAFF_ACCESS.ALLOWED_ROLES` | `["ADMIN", "GESTION", "ESTILISTA"]` | Roles autorizados |
+
+---
+
+## BLOQUE B — WIX APPS NATIVAS INSTALADAS
+
+| App | App ID | Estado | Versión/Uso | Misión |
+|---|---|---|---|---|
+| Wix Bookings | `13d21c63-b5ec-5912-8397-c3a5ddb27a97` | Activa | **V2 exclusivo** | Recursos, servicios, disponibilidad, reservas |
+| Wix Stores | `1380b703-ce81-ff05-f115-39571d94eab3` | Activa | **Catalog V1** (no V3) | Catálogo productos físicos, stock |
+| Wix Events | `140603ad-af8d-84fb-9004-ee174e35054d` | Activa | Auxiliares | Eventos fuera del flujo transaccional |
+| Wix Forms & Payments | `14ce1214-b278-a7e4-1373-00cebd1bef7c` | Activa | V2 | Cobros online, webhook eCommerce |
+| Wix Invoices | `13ee94c1-b635-8505-3391-97919052c16f` | Activa | Escritura delegada a `cajas.web.js` | Facturación documental |
+| Wix Members Area | `14cc59bc-f0b7-15b8-e1c7-89ce41d0e0c9` | Activa | V2 | Autenticación, roles, acceso |
+| Wix Gift Cards | `d80111c5-a0f4-47a8-b63a-65b54d774a27` | Activa | Requiere conciliación | Tarjetas regalo |
+
+### B.1 Ajustes específicos de Wix Apps
+
+| App | Ajuste |
+|---|---|
+| Bookings | Uso exclusivo de V2. Cero V1. |
+| Stores | Uso de Catalog V1. No mezclar con V3 sin migración formal. |
+| Invoices | Escritura delegada al módulo `cajas.web.js`. Prohibida escritura directa arbitraria. |
+| Payments / Cashier | Webhook de pago recomendado para estado/método. |
+| eCommerce / Checkout | Pago online confirmado por evento nativo. No estado local. |
+| Gift Cards | Venta/canje requiere conciliación con caja y contabilidad. |
+
+---
+
+## BLOQUE C — SDKs Y APIs UTILIZADAS
+
+| SDK | Import | Misión |
+|---|---|---|
+| Wix Bookings V2 | `wix-bookings.v2` | bookings / services / availabilityCalendar / availabilityTimeSlots |
+| Wix eCommerce Backend | `wix-ecom-backend` | checkout / orders |
+| Wix Auth (elevate) | `wix-auth` | Elevación segura en cron jobs y webhooks |
+| Wix Data | `wix-data` (`wixData`) | Acceso a colecciones CMS |
+| Wix Secrets Backend | `wix-secrets-backend` (`getSecret`) | Claves y secretos |
+| Wix Crypto | `wix-crypto` | createHash / createHmac / timingSafeEqual |
+
+### C.1 Endpoints Wix Bookings V2 utilizados
+
+| Endpoint | Función que lo consume | Misión |
+|---|---|---|
+| `availabilityTimeSlots.listAvailabilityTimeSlots()` | `_listTimeSlotsV2()` en `reservas.web.js` | Consulta de slots disponibles |
+| `availabilityTimeSlots.getAvailabilityTimeSlot()` | `revalidateExactAvailabilitySlot()` | Revalidación puntual de un slot |
+| `bookings.createBooking()` | `createBookingElevated()` en `bookingCore.js` | Creación de reserva |
+| `bookings.cancelBooking()` | `cancelBookingElevated()` | Cancelación de reserva |
+| `bookings.confirmBooking()` | `confirmOrDeclineBookingElevated()` | Confirmación de reserva |
+| `bookings.rescheduleBooking()` | `rescheduleBookingElevated()` | Reprogramación de reserva |
+| `services.getService()` | Resolución de servicio | Datos del servicio |
+
+### C.2 Endpoints Wix eCommerce utilizados
+
+| Endpoint | Función que lo consume | Misión |
+|---|---|---|
+| `checkout.createCheckout()` | `createCheckoutElevated()` | Creación de checkout de pago |
+| `checkout.getCheckoutUrl()` | `getCheckoutUrlElevated()` | URL de pago |
+| `orders.getOrder()` | `_getValidatedPaidOrder()` | Validación de orden pagada |
+
+### C.3 Webhooks
+
+| Webhook | Estado | Módulo | Colección destino | Misión |
+|---|---|---|---|---|
+| `post_webhook_m365` | Implementado (HMAC) | `http-functions.js` | `M365GraphSyncQueue` | Sincronización Microsoft 365 |
+| `post_webhook_payment` | **PENDIENTE** | `http-functions.js` | `MovimientosCaja`, `CitasF2` | Confirmación de pago Wix Payments |
+| `post_webhook_order` | **PENDIENTE** | `http-functions.js` | `MovimientosCaja`, `MovimientosInventario`, `AsientosContables` | Consolidación de pedidos eCommerce |
+
+---
+
+## BLOQUE D — MÓDULOS BACKEND (INVENTARIO DE FUNCIONES)
+
+> **Regla inquebrantable**: Ningún módulo fuera de esta lista puede crear reservas, checkouts, locks o escrituras transaccionales.
+
+### D.1 `backend/internalConfig.js`
+
+**Misión**: Punto único de verdad para constantes del sistema. Exporta colecciones, App IDs, SDK_CONFIG, enums, concurrencia y reglas de acceso.
+
+| Export | Tipo | Misión |
+|---|---|---|
+| `STAFF` | Object | Configuración de staff |
+| `COLLECTIONS` | Object | Mapa de 32 colecciones CMS |
+| `APP_IDS` | Object | App IDs nativos Wix |
+| `SDK_CONFIG` | Object | Configuración global SDK |
+| `RATE_LIMIT` | Alias | SDK_CONFIG.RATE_LIMIT |
+| `CACHE` | Alias | SDK_CONFIG.CACHE |
+| `TIMEOUTS` | Alias | SDK_CONFIG.TIMEOUTS |
+| `JOBS` | Alias | SDK_CONFIG.JOBS |
+| `CONCURRENCY` | Object | Locks y concurrencia |
+| `SLOT_SEARCH` | Object | Búsqueda de slots |
+| `API` | Object | Recursos API |
+| `STAFF_ACCESS` | Object | Roles de acceso |
+| `TIPO_FICHAJE` | Enum | Tipos de fichaje |
+| `TIPO_MOVIMIENTO` | Enum | Tipos de movimiento caja |
+| `FORMA_PAGO` | Enum | Formas de pago |
+| `IVA_RATES` | Object | Tasas IVA |
+| `CAJA_STATUS` | Enum | Estados de caja |
+| `SINGLETONS` | Object | Singletons (CAJA_PRINCIPAL) |
+| `CITA_FIELDS` | Object | Campos de cita |
+| `ESTADO_CITA` | Enum | Estados de cita |
+| `ESTADO_PAGO` | Enum | Estados de pago |
+| `COLLAB_ROLES` | Enum | Roles colaboración |
+| `JWT` | Object | Config JWT |
+| `SERVICE_CATALOG` | Object | Reglas catálogo servicios |
+
+### D.2 `backend/booking/bookingCore.js`
+
+**Misión**: Capa de acceso y primitivas atómicas para reservas. Interactúa directamente con Wix Bookings V2, sistema de locks y persistencia en CitasF2.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `logger` | Export | Logger estructurado |
+| `ERROR_CODES` | Export | Códigos de error (25 códigos) |
+| `createBookingError(code, message, details)` | Export | Crear error estructurado |
+| `normalizeError(error)` | Export | Normalizar errores |
+| `_updateCitaSafe(bookingId, updater, traceId, operation)` | Export | Actualización segura de cita |
+| `_initTransaction(pairToken, payloadHash, traceId)` | Export | Iniciar transacción idempotente |
+| `_completeTransaction(transactionId, result)` | Export | Completar transacción |
+| `_failTransaction(transactionId, reason)` | Export | Fallar transacción |
+| `_buildLockKeys(phases, lockResourceKey)` | Export | Construir claves de lock |
+| `_lockSlotKeyOrFail(lockKey, ownerId, ttlMs)` | Export | Adquirir lock o fallar |
+| `_unlockSlotKey(lockKey, ownerId)` | Export | Liberar lock |
+| `_renewLock(lockKey, ownerId, ttlMs)` | Export | Renovar lock |
+| `_persistBooking(params, traceId)` | Export | Persistir booking en CitasF2 |
+| `_normalizeAddons(addons)` | Export | Normalizar addons |
+| `_sumAddons(addons)` | Export | Sumar precio addons |
+| `_handleError(error, context)` | Export | Manejo centralizado de errores |
+| `createBookingElevated(payload)` | Export | Crear booking (Wix V2 elevado) |
+| `cancelBookingElevated(bookingId, options)` | Export | Cancelar booking |
+| `createCheckoutElevated(payload)` | Export | Crear checkout eCommerce |
+| `getCheckoutUrlElevated(checkoutId)` | Export | Obtener URL de checkout |
+| `confirmOrDeclineBookingElevated(bookingId, action)` | Export | Confirmar/declinar booking |
+| `rescheduleBookingElevated(bookingId, schedule, options)` | Export | Reprogramar booking |
+| `_forceStaffInPristineSlot(slot, resourceId, serviceId, durationMinutes)` | Export | Slot prístino con staff |
+| `_getDualPairFromCache(pairToken)` | Export | Par dual desde caché |
+| `withTimeout(promise, ms)` | Export | Timeout wrapper |
+| `_extractResourceIdsFromSlot(slot)` | Export | Extraer resourceIds de slot |
+| `_rankResourcesByLoad(resourceIds, dateYMD, traceId)` | Export | Rankear por carga |
+| `getCertifiedDualSlotsOptimized(serviceId, resourceId, dateYMD, addonIds)` | Export | Slots duales optimizados |
+| `_areSlotsContiguous(s1, s2)` | Export | Verificar contigüidad |
+| `_generateSlotKey(slotOrServiceId, resourceId, startDate, endDate)` | Export | Clave única de slot |
+| `isValidGuid(id)` | Export | Validar GUID |
+| `_projectCertifiedSlot(slot, resourceId)` | Export | Proyectar slot certificado |
+| `_projectWriterSlotFromAvailability(slot, resourceId, serviceId)` | Export | Slot Writer desde disponibilidad |
+| `_generatePairToken(traceId)` | Export | Generar pairToken |
+| `_areSlotsCompatible(slot1, slot2, maxGapMinutes)` | Export | Compatibilidad de slots |
+| `_auditBookingPrice(basePrice, addons)` | Export | Auditar precio |
+
+### D.3 `backend/booking/bookingSaga.js`
+
+**Misión**: Orquestador transaccional. Implementa el patrón Saga con compensaciones para reservas simples y duales. Gestiona locks, heartbeat, idempotencia y creación paralela F1+F2.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `_normalizePersistedMeta(meta)` | Export | Normalizar meta serializada |
+| `_resolveStablePairToken({...})` | Interna | pairToken determinista |
+| `_extractCheckoutId(checkoutSession)` | Export | Extraer checkoutId |
+| `_bestEffortUnlockAll(lockKeys, lockOwnerId)` | Interna | Liberar todos los locks |
+| `SagaStep` | Class interna | Paso de saga |
+| `BookingSagaOrchestrator` | Class export | Orquestador de saga |
+| `executeBookingSaga(unsafePayload)` | Export | Saga completa de reserva |
+
+### D.4 `backend/citasManager.web.js`
+
+**Misión**: Web methods para procesamiento de reservas duales, confirmación de pagos y reprogramaciones. Capa intermedia entre frontend y la Saga.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `_getCitaMeta(cita)` | Interna | Extraer meta de cita |
+| `_getNativeAddonIdsForRevalidation(cita)` | Interna | Addon IDs para revalidación |
+| `_findCitaByBookingId(bookingId)` | Interna | Buscar cita por bookingId |
+| `_logAuditEvent(tipoEvento, level, message, data, traceId)` | Interna | Registro de auditoría |
+| `processDualBooking(unsafePayload)` | webMethod | Procesar reserva dual |
+| `_isPaidOrderStatus(value)` | Interna | Verificar estado pagado |
+| `_getOrderBookingLineItems(order)` | Interna | Line items de orden |
+| `_getBookingLineItemsTotal(lineItems)` | Interna | Total de line items |
+| `_getValidatedPaidOrder(orderId, bookingIds, requestedTotalAmount)` | Interna | Orden pagada validada |
+| `_validatePaymentCitaSet(citas, orderId)` | Interna | Validar set de citas para pago |
+| `_setCitasPaymentState(citas, paymentState, orderId, traceId)` | Interna | Actualizar estado de pago |
+| `confirmPayment(payload)` | webMethod | Confirmar pago |
+| `rescheduleExistingBooking(bookingId, newSlot, revision)` | webMethod | Reprogramar reserva simple |
+| `_getDualSlotInput(payload, key)` | Interna | Input de slot dual |
+| `_matchesCitaPairIdentifier(cita, token)` | Interna | Verificar par dual |
+| `_getBookingSlotFromCita(cita)` | Interna | Slot desde cita |
+| `_buildDualRescheduleSlot(cita, inputSlot, expectedServiceId)` | Interna | Slot para reprogramación dual |
+| `_assertBookingOwner(cita, traceId)` | Interna | Verificar propietario |
+| `rescheduleDualBookings(payload)` | webMethod | Reprogramar par dual |
+
+### D.5 `backend/reservas.web.js`
+
+**Misión**: Módulo de disponibilidad. Consulta Wix Bookings V2 API, construye slots duales con gap, balancea carga por profesional, gestiona caché multicapa y rate limiting por superficie.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `getServiceBySlugOrId(lookup)` | webMethod | Servicio por slug o ID |
+| `_getServiceBySlugOrIdInternal(lookup, traceId)` | Export | Resolución interna |
+| `_resolvePrimaryServiceIdInternal(candidate)` | Export | Resolver serviceId |
+| `revalidateExactAvailabilitySlot({...})` | Export | Revalidar slot exacto |
+| `_resolveStaffForSlotInternal(serviceId, f1Start, f1End, f2Start, f2End, resourceId)` | Export | Resolver staff para slot |
+| `_invalidateCachesInternal(serviceId, dateYMD, resourceId, traceId)` | Export | Invalidar cachés |
+
+### D.6 `backend/cajas.web.js`
+
+**Misión**: Gestión de caja física, movimientos, arqueos X, cierres Z y recuperación fiscal. Implementa la cadena de integridad Veri*factu.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `validateFiscalConfig(traceId)` | Export | Validar config fiscal |
+| `executeLedgerWithBackoff(operationFn, maxWallTimeMs)` | Export | Backoff en ledger |
+| `getCashierState({traceId, diaKey})` | webMethod | Estado de caja |
+| `registerManualTransaction(payload)` | webMethod | Transacción manual TPV |
+| `registerBookingPayment(bookingIds, amount, method, meta)` | Export | Pago de reserva |
+| `queueFiscalRecovery(recoveryData)` | Export | Cola de recuperación fiscal |
+| `registerXCount(diaKey, {metalicoCaja, traceId})` | webMethod | Arqueo X |
+| `registerZClosing(diaKey, {traceId})` | webMethod | Cierre Z |
+| `verifyFiscalHashChainIntegrity(options)` | Export | Verificar cadena hash |
+
+### D.7 `backend/horario.web.js`
+
+**Misión**: Registro horario laboral del personal. Fichajes inmutables, estado de jornada, cálculo de horas trabajadas y ajustes administrativos.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `getMyStaffContext(options)` | webMethod | Contexto del staff |
+| `registrarFichaje(options)` | webMethod | Registrar fichaje |
+| `getEstadoJornada(options)` | webMethod | Estado de jornada |
+| `calcularHorasTrabajadas(options)` | webMethod | Calcular horas trabajadas |
+| `getHistorialFichajes(options)` | webMethod | Historial de fichajes |
+| `registrarAjusteHorario(options)` | webMethod | Ajuste horario (admin) |
+| `getResumenHoras(options)` | webMethod | Resumen de horas |
+| `_validateScheduleNoOverlap(resourceId, dayOfWeek, startTime, endTime, excludeId)` | Export | Validar solapamiento |
+
+### D.8 `backend/security.js`
+
+**Misión**: Motor de seguridad. Rate limiter, verificación de roles y bloqueo persistente cross-instancia.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `rateLimiter({surface, key}, maxRequests, windowMs)` | Export | Rate limiter |
+| `isKeyPersistentlyBlocked(surface, key)` | Export | Bloqueo persistente |
+| `isAdmin(traceId)` | Export | Verificar rol ADMIN |
+| `isGestion(traceId)` | Export | Verificar rol GESTION (antes CAJERO) |
+| `isStaffCollaborator(traceId)` | Export | Verificar rol ESTILISTA |
+| `requireAdmin(traceId)` | Export | Exigir ADMIN |
+| `requireGestion(traceId)` | Export | Exigir GESTION |
+| `requireMarianManager(traceId)` | Export | Exigir Marian Manager |
+
+### D.9 `backend/security.web.js`
+
+**Misión**: Web methods que envuelven las verificaciones de seguridad para consumo desde frontend.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `checkAdminAccess(options)` | webMethod | Acceso admin |
+| `checkGestionAccess(options)` | webMethod | Acceso gestión |
+| `checkStaffCollaboratorAccess(options)` | webMethod | Acceso colaborador |
+
+### D.10 `backend/securityEngine.js`
+
+**Misión**: Primitivas criptográficas: hash SHA-256, HMAC-SHA256, cadena hash Veri*factu, comparación segura y JWT.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `hashSHA256(input)` | Export | Hash SHA-256 |
+| `hmacSha256Hex(key, payload)` | Export | HMAC-SHA256 |
+| `hashChain(prevHash, payload)` | Export | Cadena hash Veri*factu |
+| `timingSafeEqual(a, b)` | Export | Comparación segura |
+| `_base64UrlEncode(input)` | Interna | Base64URL encode |
+| `_base64UrlDecode(input)` | Interna | Base64URL decode |
+| `generateJWT(payload, traceId)` | Export | Generar JWT |
+| `verifyJWT(token, traceId)` | Export | Verificar JWT |
+
+### D.11 `backend/staff.js`
+
+**Misión**: Catálogo de personal. Búsqueda O(1) por cualquier identificador y caché de nombres visibles.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `_loadStaffCatalog()` | Interna | Cargar catálogo de staff |
+| `clearStaffCache()` | Export | Limpiar caché de staff |
+| `getAllStaff()` | Export | Todo el staff |
+| `findStaff(identifier)` | Export | Buscar staff |
+| `findStaffByResourceId(resourceId)` | Export | Staff por resourceId |
+| `getStaffDisplayName(resourceId)` | Export | Nombre visible de staff |
+| `getStaffScheduleId(resourceId)` | Export | ScheduleId de staff |
+
+### D.12 `backend/bookingServiceSync.js`
+
+**Misión**: Cola de sincronización entre ServiciosCatalogo (CMS) y Wix Bookings V2 nativo. Encola cambios y los procesa con backoff y reintentos.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `_cleanText(value, maxLength)` | Interna | Limpiar texto |
+| `_cleanGuid(value, errorCode)` | Interna | Limpiar GUID |
+| `_cleanGuidList(value)` | Interna | Limpiar lista de GUIDs |
+| `_buildDesiredProjection(item)` | Interna | Proyección deseada |
+| `enqueueBookingsServiceSync(serviceItem)` | Export | Encolar sync de servicio |
+| `processBookingsServiceSyncQueue(options)` | Export | Procesar cola de sync |
+
+### D.13 `backend/http-functions.js`
+
+**Misión**: Endpoints HTTP expuestos. Webhooks externos con validación HMAC.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `_validateHMACSignature(request, bodyString, traceId)` | Interna | Validar firma HMAC |
+| `post_webhook_m365(request)` | Export | Webhook M365 |
+
+### D.14 `backend/inventario.web.js`
+
+**Misión**: Dashboard de inventario, cola de conciliación Wix y movimiento seguro de inventario.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `getInventoryDashboard(options)` | webMethod | Dashboard de inventario |
+| `getInventoryReconciliationQueue(options)` | webMethod | Cola de conciliación |
+| `recordInventoryMovementSafe(sku, type, quantity, meta)` | Export | Movimiento seguro de inventario |
+
+### D.15 `backend/responseUtils.js`
+
+**Misión**: Utilitarios de respuesta. Clase AppError, envoltorio de webMethod y normalización de errores públicos.
+
+| Función | Visibilidad | Misión |
+|---|---|---|
+| `AppError` | Class export | Clase de error |
+| `successResponse(data, metaExtra)` | Export | Respuesta de éxito |
+| `errorResponse(code, message, metaExtra)` | Export | Respuesta de error |
+| `_toPublicError(err, fallbackCode, fallbackMessage)` | Export | Error público |
+| `toWebMethodResult(actionFn)` | Export | Wrapper webMethod |
+| `isSuccess(res)` | Export | Verificar éxito |
+
+### D.16 `backend/data.js`
+
+**Misión**: Hooks de inmutabilidad y validación para colecciones CMS. Protege integridad fiscal, contable y laboral.
+
+| Hook | Colección | Acción |
+|---|---|---|
+| `ServiciosCatalogo_beforeInsert/Update` | ServiciosCatalogo | Validación de esquema |
+| `MapaStaff_beforeInsert/Update` | MapaStaff | Validación de unicidad |
+| `CitasF2_beforeInsert/Update` | CitasF2 | Validación de cita |
+| `CajaActual_beforeInsert/Update/Remove` | CajaActual | Singleton protegido |
+| `MovimientosCaja_beforeInsert` | MovimientosCaja | Validación hash chain |
+| `MovimientosCaja_beforeUpdate/Remove` | MovimientosCaja | FISCAL_VIOLATION |
+| `HistoricoCierresZ_beforeUpdate/Remove` | HistoricoCierresZ | FISCAL_VIOLATION |
+| `EventosSistemaFacturacion_beforeUpdate/Remove` | EventosSistemaFacturacion | SIF_VIOLATION |
+| `RegistrosHorariosStaff_beforeInsert` | RegistrosHorariosStaff | Validación de fichaje |
+| `RegistrosHorariosStaff_beforeUpdate/Remove` | RegistrosHorariosStaff | LABOR_LOG_VIOLATION |
+| `AsientosContables_beforeUpdate/Remove` | AsientosContables | Bloquea POSTED/LOCKED |
+| `LineasAsientoContable_beforeUpdate/Remove` | LineasAsientoContable | Bloquea si padre posteado |
+| `SecuenciaTickets_beforeUpdate` | SecuenciaTickets | No salto regresivo |
+| `InventarioStockVentaCierre_beforeUpdate/Remove` | InventarioStockVentaCierre | Bloquea cierre firmado |
+
+---
+
+## BLOQUE E — HELPERS FRONTEND / PÚBLICO
+
+### E.1 `public/mmUtils.js`
+
+**Misión**: Utilitarios seguros para uso en widgets e interfaces. Validación, normalización, timezone, enmascarado PII, traceId.
+
+| Función | Misión |
+|---|---|
+| `makeTraceId(prefix)` | Generar traceId único |
+| `_safeTrim(v)` | Trim seguro |
+| `_cloneDeep(value)` | Clonación profunda |
+| `_safeEmail(email)` | Email seguro |
+| `_safePhone(phone)` | Teléfono seguro |
+| `normalizeIdPart(v, maxLen)` | Normalizar ID |
+| `_roundMoney(value)` | Redondeo monetario |
+| `_readPositiveAmount(value)` | Importe positivo |
+| `_readNonNegativeAmount(value)` | Importe no negativo |
+| `_readDate(value)` | Leer fecha |
+| `_cleanText(value, maxLength)` | Limpiar texto |
+| `_stableSerialize(value)` | Serialización estable |
+| `_extractRelationalId(value)` | Extraer ID relacional |
+| `_looksLikeGuid(v)` | Verificar GUID |
+| `_safeSlugOrId(raw)` | Slug o ID seguro |
+| `_normalizeLocalIsoStr(rawStr)` | Normalizar ISO local |
+| `getUtcDateFromMadridLocal(localStr)` | Madrid local → UTC |
+| `getMadridLocalStringNoZ(utcDate)` | UTC → Madrid local |
+| `_toDateSafe(val)` | Date seguro |
+| `withTimeout(promise, timeoutMs, label)` | Timeout wrapper |
+| `_executeWithRetry(fn, retries, delay)` | Retry con backoff |
+| `_maskEmail(email)` | Enmascarar email |
+| `_maskIp(ip)` | Enmascarar IP |
+| `_hashKey(input)` | Hash key |
+| `_generateUUID()` | Generar UUID |
+| `_isValidEmail(email)` | Validar email |
+| `_normType(type)` | Normalizar tipo |
+| `_maskPhone(phone)` | Enmascarar teléfono |
+| `_maskName(name)` | Enmascarar nombre |
+
+### E.2 `public/widgetBridge.js`
+
+**Misión**: Puente de comunicación bidireccional entre widgets embebidos y la página contenedora vía postMessage.
+
+| Función | Misión |
+|---|---|
+| `createWidgetBridge(widgetElement, options)` | Puente de comunicación con widget |
+
+### E.3 `public/qrHelper.js`
+
+**Misión**: Generación de QR Veri*factu y HTML de recibo fiscal para cumplimiento AEAT.
+
+| Función | Misión |
+|---|---|
+| `AEAT_VERIFACTU_ENDPOINTS` | Endpoints AEAT |
+| `_formatDateToAeatDdMmYyyy(dateValue)` | Formato fecha AEAT |
+| `_escapeHtml(str)` | Escapar HTML |
+| `generateVerifactuQrUrl(params, options)` | URL QR Veri*factu |
+| `extractVerifactuData(movimiento, options)` | Extraer datos Veri*factu |
+| `buildVerifactuReceiptHtml(movimiento, options)` | HTML de recibo |
+
+### E.4 `public/marianAdministrationController.js`
+
+**Misión**: Controlador del widget de administración. Despacha acciones admin, lee parámetros de período.
+
+| Función | Misión |
+|---|---|
+| `_postError(post, responseType, messageId, message, code)` | Error en postMessage |
+| `_readYear(value)` | Leer año |
+| `_readQuarter(value)` | Leer trimestre |
+| `_readEmail(value)` | Leer email |
+| `_readDocumentId(value)` | Leer ID de documento |
+| `_readPeriodParams(payload)` | Leer parámetros de período |
+| `ADMIN_ACTION_DISPATCH` | Mapa de despacho de acciones |
+| `initMarianAdministration(widget, slug)` | Inicializar controlador |
+
+---
+
+## BLOQUE F — COLECCIONES CMS (TABLA MAESTRA)
+
+> **Detalle de campos**: Ver `SSOT.json` (machine-readable) y `ESQUEMA CMS NORMALIZADO` §4.00 a §4.32.
+
+| # | Misión | Alias COLLECTIONS | CollectionID | Display Field | Nivel | Inmutabilidad |
+|---|---|---|---|---|---|---|
+| 0 | Auxiliar | CATEGORIAS_SERVICIO | CategoriasServicio | nombreCategoria | 0 | Ninguna |
+| 1 | M1 | SERVICIOS_CATALOGO | ServiciosCatalogo | tituloServicio | 1 | Validación esquema |
+| 2 | M1 | COMPLEMENTOS_CATALOGO | ComplementosCatalogo | tituloComplemento | 1 | Ninguna |
+| 3 | M1 | MAPA_STAFF | MapaStaff | nombreStaff | 0 | Unicidad |
+| 4 | M1 | CITAS_F2 | CitasF2 | reservaId | 2 | Validación |
+| 5 | M2 | AVAILABILITY_DAYS_CACHE | AvailabilityDaysCache | idCache | 2 | Caché |
+| 6 | M2 | DUAL_SLOT_CACHE | DualSlotCache | parToken | 2 | Caché |
+| 7 | M3 | BOOKING_TRANSACTIONS | BookingTransactions | parToken | 2 | Transaccional |
+| 8 | M3 | BOOKINGS_SERVICE_SYNC_QUEUE | BookingsServiceSyncQueue | idCola | 2 | Cola |
+| 9 | M3 | COMPENSACIONES_PENDIENTES | CompensacionesPendientes | reservaId | 2 | Transaccional |
+| 10 | M3 | M365_GRAPH_SYNC_QUEUE | M365GraphSyncQueue | registroExternoId | 2 | Cola |
+| 11 | M4 | INVENTARIO_STOCK_VENTA | InventarioStockVenta | productoNombre | 3 | Ninguna |
+| 12 | M4 | MOVIMIENTOS_INVENTARIO | MovimientosInventario | movimientoToken | 3 | Inmutable |
+| 13 | M4 | INVENTARIO_STOCK_VENTA_CIERRE | InventarioStockVentaCierre | inventarioCierreId | 3 | Bloqueo firmado |
+| 14 | M4 | PROVEEDORES_LISTA | ProveedoresLista | proveedorNombre | 0 | Ninguna |
+| 15 | M5 | CAJA_ACTUAL | CajaActual | operacionFecha | 4 | Singleton |
+| 16 | M5 | MOVIMIENTOS_CAJA | MovimientosCaja | facturaNumero | 4 | **FISCAL_VIOLATION** |
+| 17 | M5 | CONTROL_PARCIAL_X | ControlParcialX | operacionFecha | 4 | Operativo |
+| 18 | M5 | HISTORICO_CIERRES_Z | HistoricoCierresZ | operacionFecha | 4 | **FISCAL_VIOLATION** |
+| 19 | M5 | SECUENCIA_TICKETS | SecuenciaTickets | idElemento | 4 | No regresivo |
+| 20 | M6 | CONFIGURACION_FISCAL | ConfiguracionFiscal | negocioNombre | 0 | Ninguna |
+| 21 | M6 | LIBRO_IVA_FACTURAS_EXPEDIDAS | LibroIVAFacturasExpedidas | facturaNumero | 5 | Fiscal |
+| 22 | M6 | LIBRO_IVA_FACTURAS_RECIBIDAS | LibroIVAFacturasRecibidas | recepcionNumero | 5 | Fiscal |
+| 23 | M6 | PLAN_CUENTAS_CONTABLES | PlanCuentasContables | cuentaNombre | 5 | Contable |
+| 24 | M6 | ASIENTOS_CONTABLES | AsientosContables | asientoNumero | 5 | Bloqueo POSTED |
+| 25 | M6 | LINEAS_ASIENTO_CONTABLE | LineasAsientoContable | lineaAsientoId | 5 | Bloqueo POSTED |
+| 26 | M6 | LIBRO_MAYOR_CONTABLE_SALDOS | LibroMayorContableSaldos | cuentaCodigo | 5 | Contable |
+| 27 | M7 | EVENTOS_SISTEMA_FACTURACION | EventosSistemaFacturacion | sistemaEventoId | 6 | **SIF_VIOLATION** |
+| 28 | M7 | MM_AUDIT_LOG | MmAuditLog | eventoTipo | 6 | Auditoría |
+| 29 | M7 | REGISTROS_HORARIOS_STAFF | RegistrosHorariosStaff | registradoFecha | 6 | **LABOR_LOG_VIOLATION** |
+| 30 | Infra | SLOT_LOCKS | SlotLocks | slotClave | 2 | TTL based |
+| 31 | Infra | RATE_LIMIT_BLOCKS | RateLimitBlocks | idElemento | 7 | TTL based |
+| 32 | Infra | ALERTAS_OPERATIVAS | AlertasOperativas | idElemento | 7 | Ninguna |
+
+---
+
+## BLOQUE G — CONSTANTES GLOBALES
+
+### G.1 `SDK_CONFIG`
+
+| Constante | Valor | Misión |
+|---|---|---|
+| `TZ` | `Europe/Madrid` | Zona horaria |
+| `LOCATION_ID` | `7a12abfd-bf30-4847-bcdf-00dc573d4802` | Ubicación Wix |
+| `LOCATION_TYPES.TIME_SLOTS` | `BUSINESS` | Tipo location para slots |
+| `LOCATION_TYPES.BOOKINGS_WRITER` | `OWNER_BUSINESS` | Tipo location para escritura |
+
+### G.2 Timeouts (ms)
+
+| Constante | Valor | Misión |
+|---|---|---|
+| `API_MS` | 15000 | Llamadas API generales |
+| `BOOKING_CREATION_MS` | 25000 | Creación de booking |
+| `DUAL_BOOKING_MS` | 40000 | Booking dual F1+F2 |
+| `CHECKOUT_MS` | 20000 | Checkout eCommerce |
+| `CMS_MS` | 15000 | Consultas CMS |
+| `WATCHDOG_MS` | 30000 | Watchdog general |
+| `WEBHOOK_MS` | 30000 | Webhooks externos |
+
+### G.3 Cachés (TTL ms)
+
+| Constante | Valor | Equiv. | Misión |
+|---|---|---|---|
+| `SERVICES_TTL_MS` | 600000 | 10 min | Caché de servicios |
+| `SLOTS_CACHE_TTL_MS` | 120000 | 2 min | Caché de slots |
+| `DUAL_CACHE_TTL_MS` | 900000 | 15 min | Caché pares duales |
+| `STAFF_TTL_MS` | 300000 | 5 min | Caché de staff |
+| `SECRET_CACHE_TTL_MS` | 300000 | 5 min | Caché de secretos |
+
+### G.4 Rate Limiting
+
+| Constante | Valor | Misión |
+|---|---|---|
+| `MAX_REQUESTS` | 20 | Requests por ventana general |
+| `WINDOW_MS` | 5000 | Ventana deslizante |
+| `BOOKING_MAX_REQUESTS` | 5 | Bookings por ventana |
+| `BOOKING_WINDOW_MS` | 10000 | Ventana de bookings |
+| `AVAILABILITY_REQUESTER_MAX_REQUESTS` | 12 | Por solicitante |
+| `AVAILABILITY_GLOBAL_MAX_REQUESTS` | 120 | Global disponibilidad |
+
+### G.5 Concurrencia, locks y transacciones
+
+| Constante | Valor | Misión |
+|---|---|---|
+| `MUTEX_TTL_MS` | 300000 | TTL de locks (5 min) |
+| `HEARTBEAT_MS` | 15000 | Renovación de locks |
+| `TRANSACTION_POLL_BASE_MS` | 250 | Poll base transacciones |
+| `TRANSACTION_MAX_WAIT_MS` | 3000 | Espera máx. transacción |
+| `LOCK_CLEANUP_GRACE_MS` | 60000 | Gracia limpieza locks |
+| `MAX_COMPENSATION_RETRIES` | 3 | Reintentos compensación |
+| `LEDGER_MUTEX_TTL_MS` | 45000 | TTL mutex ledger |
+| `JITTER_MS.min` | 400 | Jitter mínimo F2 |
+| `JITTER_MS.max` | 1000 | Jitter máximo F2 |
+
+### G.6 Jobs programados
+
+| Constante | Valor | Misión |
+|---|---|---|
+| `AUDIT_RETENTION_DAYS` | 90 | Retención auditoría |
+| `DELETE_BATCH_SIZE` | 100 | Lote de borrado |
+| `DELETE_MAX_PAGES` | 10 | Máx páginas borrado |
+| `FISCAL_RECOVERY_BATCH_SIZE` | 25 | Lote recuperación fiscal |
+| `BOOKINGS_SERVICE_SYNC_MAX_ATTEMPTS` | 5 | Intentos sync servicios |
+| `BOOKINGS_SERVICE_SYNC_BATCH_SIZE` | 20 | Lote sync servicios |
+| `BOOKINGS_SERVICE_SYNC_BACKOFF_MS` | 300000 | Backoff (5 min) |
+| `M365_GRAPH_SYNC_BATCH_SIZE` | 20 | Lote sync M365 |
+| `M365_GRAPH_SYNC_MAX_ATTEMPTS` | 3 | Intentos M365 |
+
+### G.7 Cron jobs activos
+
+| Cron | Expresión | Misión |
+|---|---|---|
+| `cleanExpiredLocks` | `15 * * * *` | Purga locks expirados en SlotLocks |
+| `cleanupExpiredDualCache` | `20 * * * *` | Elimina pares duales expirados de DualSlotCache |
+| `runPendingCompensationsJob` | `30 * * * *` | Procesa CompensacionesPendientes |
+| `cleanExpiredDaysCache` | `0 1 * * *` | Purga AvailabilityDaysCache expirados |
+| `cleanExpiredSlotsCache` | `10 1 * * *` | Purga caché RAM de slots |
+| `systemHealthCheck` | `0 7 * * *` | Comprueba BD, secretos, ledger fiscal |
+
+---
+
+## BLOQUE H — ENUMS DE NEGOCIO
+
+> Todos congelados con `Object.freeze` en `internalConfig.js`. Fuente única de verdad para validaciones en hooks.
+
+| Enum | Valores | Misión |
+|---|---|---|
+| `TIPO_FICHAJE` | ENTRADA, SALIDA, PAUSA_INICIO, PAUSA_FIN, AJUSTE | Tipos de evento laboral |
+| `TIPO_MOVIMIENTO` | VENTA_EFECTIVO, VENTA_TARJETA, VENTA_BIZUM, VENTA_ONLINE, REEMBOLSO, AJUSTE, PROPINA | Tipos de movimiento caja |
+| `FORMA_PAGO` | EFECTIVO, TARJETA, BIZUM, ONLINE | Formas de pago |
+| `IVA_RATES` | GENERAL=0.21, REDUCIDO=0.10, SUPERREDUCIDO=0.04, EXENTO=0.0 | Tasas IVA |
+| `CAJA_STATUS` | ABIERTA, CERRADA | Estados de caja |
+| `ESTADO_CITA` | CONFIRMED, PENDING_PAYMENT, CANCELED, REFUNDED | Estados de cita |
+| `ESTADO_PAGO` | UNPAID, NOT_PAID, PENDING_PAYMENT, PENDING_LEDGER, PAID, REFUNDED, PARTIALLY_REFUNDED | Estados de pago |
+| `COLLAB_ROLES` | ADMIN, GESTION, ESTILISTA | Roles de colaboración |
+| `SERVICE_CATALOG.STATES` | ACTIVO, INACTIVO, BORRADOR | Estados de servicio |
+| `SERVICE_CATALOG.CURRENCY` | EUR | Moneda |
+| `SERVICE_CATALOG.MAX_TITLE_LENGTH` | 160 | Límite título |
+| `SERVICE_CATALOG.MAX_SUMMARY_LENGTH` | 120 | Límite resumen |
+| `SERVICE_CATALOG.MAX_DESCRIPTION_LENGTH` | 6000 | Límite descripción |
+| `SERVICE_CATALOG.MAX_DURATION_MINUTES` | 1440 | Límite duración |
+| `SLOT_SEARCH.DIAS_LIMITE` | 14 | Días de búsqueda |
+| `SLOT_SEARCH.TOLERANCE_MINUTES` | 10 | Tolerancia de minutos |
+| `JWT.ALGORITHM` | HS256 | Algoritmo JWT |
+| `JWT.EXPIRATION_MS` | 1800000 | Expiración JWT (30 min) |
+| `SINGLETONS.CAJA` | CAJA_PRINCIPAL | Singleton de caja |
+
+---
+
+## BLOQUE I — SECRETS MANAGER (`mmSecrets.js`)
+
+> Todos los secretos se obtienen exclusivamente desde Wix Secrets Manager. Nunca hardcodeados. Cacheados con `SECRET_CACHE_TTL_MS`.
+
+| Secreto | Clave | Misión |
+|---|---|---|
+| `FISCAL_KEY` | `SECRETFISCALKEY` | Clave HMAC cadena fiscal |
+| `FISCAL_NIF_EMISOR` | `FISCAL_NIF_EMISOR` | NIF emisor facturas |
+| `AUTH_JWT_KEY` | `SECRET_AUTH_JWT_KEY` | Clave JWT autenticación |
+| `ADMIN_EMAILS` | `ADMIN_EMAILS` | Emails administradores |
+| `GESTION_EMAILS` | `GESTION_EMAILS` | Emails gestión/caja |
+| `POWER_AUTOMATE` | `POWER_AUTOMATE_TOKEN` | Token Power Automate |
+| `SENDGRID_API_KEY` | `SENDGRID_API_KEY` | API key SendGrid |
+| `SENDGRID_FROM_EMAIL` | `SENDGRID_FROM_EMAIL` | Remitente SendGrid |
+| `RESEND_API_KEY` | `RESEND_API_KEY` | API key Resend |
+| `RESEND_FROM_EMAIL` | `RESEND_FROM_EMAIL` | Remitente Resend |
+| `MARIAN_ASSISTANT_OPENAI_KEY` | `MARIAN_ASSISTANT_OPENAI_KEY` | OpenAI asistente |
+| `M365_GRAPH_CLIENT_ID` | `M365_CLIENT_ID` | Client ID M365 Graph |
+| `M365_GRAPH_CLIENT_SECRET` | `M365_CLIENT_SECRET` | Client Secret M365 |
+| `M365_GRAPH_TENANT_ID` | `M365_TENANT_ID` | Tenant ID M365 |
+| `M365_GRAPH_SITE_ID` | `M365_SITE_ID` | Site ID SharePoint |
+| `M365_GRAPH_LIST_ID` | `M365_LIST_ID` | List ID SharePoint |
+| `M365_WEBHOOK_HMAC_KEY` | `SECRET_M365_WEBHOOK_HMAC_KEY` | HMAC webhook M365 |
+
+---
+
+## BLOQUE J — NOMENCLATURA Y REGLAS (Decreto v5002.5)
+
+| # | Regla | Descripción | Ejemplo correcto | Prohibido |
+|---|---|---|---|---|
+| R1 | Dualidad de identidad | ID Visible (ES) + ID Técnica (EN) | `tituloServicio` / `title` | Una sola identidad |
+| R2 | Traducción literal conservando orden | Orden de palabras del EN | `serviceId` → `servicioId` | `idServicio` |
+| R3 | Diferenciación por contexto | Sufijo contextual | `descripcionServicio` | `description` genérico |
+| R4 | Términos intraducibles | `slot`, `lock`, `staff` no se traducen | `slotF1`, `nombreStaff` | `ranuraF1`, `empleado` |
+| R5 | Restricciones sintácticas | Cero tildes/espacios/guiones | `operacionFecha` | `operaciónFecha` |
+| R6 | Alineación nativa Wix V2 | IDs técnicas = propiedades Wix | `bookingId`, `serviceId` | `booking_id` |
+| R7 | Cero legacy | Prohibidos identificadores legacy | `serviceId`, `linkedPhases` | `primaryServiceGuid` |
+
+### J.1 Identidades legacy prohibidas (`forbiddenLegacyIds`)
+
+| ID prohibida | Sustituto canónico |
+|---|---|
+| `primaryServiceGuid` | `serviceId` |
+| `secondaryServiceGuid` | `linkedPhases` |
+| `staffId` | `resourceId` |
+| `empleada` | `staff` o `resource` |
+| `lockKey` (field key) | `slotKey` |
+| `resourceName` | `displayName` / `nombreStaff` |
+| `MmLocks` | `SlotLocks` |
+| `CONCILIACION_STOCK_WIX` | `MovimientosInventario` |
+| `SYNC_M365` | `M365GraphSyncQueue` |
+| `AVAILABILITY_SLOTS_CACHE` | `DualSlotCache` |
+
+### J.2 Términos intraducibles
+
+| Término | Aplicación |
+|---|---|
+| `slot` | `slotF1`, `slotF2`, `slotKey`, `slotClave` |
+| `lock` | `SlotLocks`, `lockPropietarioId` |
+| `staff` | `nombreStaff`, `staffMiembroId`, `disponibleStaff` |
+
+### J.3 Nomenclatura canónica v19.6 (reservas)
+
+| Dominio | Nombre canónico | No usar |
+|---|---|---|
+| Servicio principal | `serviceId` | `primaryServiceGuid`, `bookingsServiceId` |
+| Servicio F2 | `linkedPhases` | `secondaryServiceGuid`, `f2ServiceId` |
+| Fases internas | `phase1ServiceId`, `phase2ServiceId` | `phaseOneServiceId`, `serviceIdF1` |
+| Profesional | `resourceId` | `staffId`, `empleada` |
+| Búsqueda personal | `findStaff(identifier)` | Mapas locales |
+| Reserva dual | `pairToken` | UUID aleatorio |
+| Lock físico | `slotKey` | `pairToken` como lock |
+
+---
+
+## BLOQUE K — MATRIZ DE VÍNCULOS ENTRE COLECCIONES
+
+| Origen | Campo | Tipo | Destino | Cardinalidad |
+|---|---|---|---|---|
+| ServiciosCatalogo | categoryName | REFERENCE | CategoriasServicio | 1:1 |
+| ServiciosCatalogo | availableStaff | MULTI_REF | MapaStaff | 0:N |
+| ServiciosCatalogo | addOnOptions | MULTI_REF | ComplementosCatalogo | 0:N |
+| InventarioStockVenta | supplier | TEXT | ProveedoresLista | Lógico |
+| CitasF2 | serviceId | TEXT | ServiciosCatalogo.servicioId | Lógico |
+| CitasF2 | resourceId | TEXT | MapaStaff.recursoId | Lógico |
+| MovimientosCaja | linkedBookingId | TEXT | CitasF2.bookingId | Lógico |
+| MovimientosCaja | resourceId | TEXT | MapaStaff.recursoId | Lógico |
+| MovimientosInventario | sku | TEXT | InventarioStockVenta.articuloSku | Lógico |
+| AsientosContables | journalEntryId | TEXT | LineasAsientoContable.diarioAsientoId | 1:N |
+| EventosSistemaFacturacion | journalEntryId | TEXT | AsientosContables._id | Lógico |
+| RegistrosHorariosStaff | resourceId | TEXT | MapaStaff.recursoId | Lógico |
+
+---
+
+## BLOQUE L — REFERENCIAS CANÓNICAS EXTERNAS
+
+| Fuente | URL |
+|---|---|
+| Wix: Working with Payments, Transactions, and Orders | https://dev.wix.com/docs/api-reference/business-solutions/e-commerce/payments/working-with-payments-transactions-and-orders |
+| Wix: Create Checkout | https://dev.wix.com/docs/velo/apis/wix-ecom-backend/checkout/create-checkout |
+| AEAT: Sistemas Informáticos de Facturación y VERIFACTU | https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu.html |
+| AEPD: Responsabilidad proactiva | https://www.aepd.es/preguntas-frecuentes/2-tus-obligaciones-como-responsable-del-tratamiento/4-los-principios-del-tratamiento/FAQ-0208-que-es-el-principio-de-responsabilidad-proactiva |
+
+---
+
+## DICTAMEN DEL INVENTARIO
+
+| Aspecto | Estado |
+|---|---|
+| Módulos backend inventariados | 16 canónicos + data.js |
+| Helpers frontend inventariados | 4 |
+| Colecciones CMS inventariadas | 32 canónicas + 1 auxiliar |
+| Funciones backend totales | ~120 |
+| Funciones frontend totales | ~43 |
+| Constantes globales | ~50 |
+| Enums de negocio | ~12 |
+| Secrets Manager | 17 secretos |
+| Cron jobs | 6 |
+| Hooks de inmutabilidad | 26 sobre 12 colecciones |
+| Webhooks implementados | 1 (M365) |
+| Webhooks pendientes | 2 (pago, pedido) |
+| Identidades legacy purgadas | 10 |
+| Términos intraducibles | 3 (slot, lock, staff) |
+
+> **Nota**: Este inventario es la referencia rápida del ecosistema. Para el detalle de campos por colección, consultar `SSOT.json` y `ESQUEMA CMS NORMALIZADO`. Para el detalle de flujos, consultar `DOSSIER MOTOR RESERVAS` y `DOSSIER CAJA`. Para reglas de desarrollo, consultar `DIRECTRICES V19`.
+
+---
+
+*Fin del Inventario Maestro del Ecosistema Marian Madrid*
+*Versión: v5002.6-CONSOLIDADA*
+*Guardian: Velo Code Guardian*
